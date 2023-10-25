@@ -1,0 +1,214 @@
+/* Copyright (c) 2017, The Linux Foundation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+/* Add configs for zte akershus here. */
+
+#include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+
+/* charger & fg module modifications: start */
+&tlmm {
+	/* Delete gpio122 configuration */
+	idt_int_default: idt_int_default {
+		mux {
+			pins = "gpio122";
+			function = "gpio";
+		};
+		config {
+			pins = "gpio122";
+			drive-strength = <2>;
+			/delete-property/bias-pull-up;
+			bias-disable;
+			input-enable;
+		};
+	};
+};
+
+&pm8998_gpios {
+	wireless_charger {
+		wireless_charger_active: wireless_charger_active {
+			pins = "gpio15";
+			function = "normal";
+			power-source = <0>;
+			output-low;
+			input-disable;
+		};
+		wireless_charger_suspend: wireless_charger_suspend {
+			pins = "gpio15";
+			function = "normal";
+			power-source = <0>;
+			output-high;
+			input-disable;
+		};
+	};
+};
+
+&smb1355_charger_0 {
+	/delete-property/status;
+	qcom,parallel-mode = <3>;
+};
+
+&smb1355_charger_1 {
+	/delete-property/status;
+	qcom,parallel-mode = <3>;
+};
+
+&qupv3_se10_i2c {
+	idtp922x: IDT,idtp922x@61 {
+		compatible = "IDT,idt_wireless_power";
+		reg = <0x61>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		interrupt-parent = <&tlmm>;
+		interrupt_names = "idtp922x";
+		#interrupts = <376 IRQ_TYPE_EDGE_FALLING>;
+
+		pinctrl-names = "idt_int_default", "idt_en_pin_active", "idt_en_pin_suspend";
+		pinctrl-0 = <&idt_int_default>;
+		pinctrl-1 = <&wireless_charger_active>;
+		pinctrl-2 = <&wireless_charger_suspend>;
+		interrupt-controller;
+		#interrupt-cells = <2>;
+
+		qcom,idt-ss-good-thr = <115>;
+		qcom,idt-int-pin = <&tlmm 122 0>;
+		qcom,idt-power-good = <&tlmm 52 0>;
+
+		status = "ok";
+	};
+};
+
+&mtp_batterydata {
+	/delete-node/qcom,itech_3000mah;
+	/delete-node/qcom,ascent_3450mah;
+	/delete-node/qcom,demo_6000mah;
+	#include "3409296_cos_4000mAh_averaged_MasterSlave_Apr9th2018_PMI8998GUI20058.dtsi"
+};
+
+&pmi8998_charger {
+	qcom,battery-data = <&mtp_batterydata>;
+	qcom,fcc-max-ua = <3000000>;
+	qcom,fv-max-uv = <4450000>;
+	qcom,usb-icl-ua = <2500000>;
+	qcom,dc-icl-ua = <750000>;
+	/* usb fcc @ screen on
+	usb fcc @ screen off
+	dc fcc @ screen on
+	dc fcc @ screen off */
+	qcom,thermal-mitigation
+			= <3000000 3000000 3000000 2500000 2250000 2000000 1750000 1500000 1000000 500000 300000
+                          3000000 3000000 3000000 2500000 2250000 2000000 1500000 500000 300000 300000 300000
+                          2000000 2000000 1750000 1500000 1250000 1000000 750000 500000 400000 300000 100000
+                          300000 300000 300000 300000 300000 300000 300000 300000 100000 100000 100000>;
+	qcom,sw-jeita-enable;
+};
+
+&pmi8998_fg {
+	qcom,fg-chg-term-current = <150>;
+	qcom,fg-sys-term-current = <(-300)>;
+	qcom,fg-recharge-soc-thr = <99>;
+	qcom,fg-recharge-soc-thr-warm = <50>;
+	qcom,fg-force-load-profile;
+	qcom,battery-thermal-coefficients = [c7 50 ff];
+	qcom,fg-jeita-thresholds = <0 10 45 55>;
+	qcom,fg-cutoff-voltage = <3400>;
+	qcom,fg-empty-voltage = <3200>;
+};
+/* charger module modifications: end */
+
+&pmi8998_haptics {
+	qcom,vmax-mv = <2500>;
+	qcom,wave-play-rate-us = <4255>;
+	qcom,lra-auto-mode;
+	qcom,lra-auto-res-mode = "none";
+	status = "okay";
+};
+
+&soc {
+	rpmh-regulator-bobb1 {
+		qcom,supported-modes =
+			<RPMH_REGULATOR_MODE_SMPS_AUTO
+			 RPMH_REGULATOR_MODE_SMPS_PWM>;
+		qcom,mode-threshold-currents = <0 2000000>;
+	};
+};
+
+&wcd934x_cdc {
+	mic_bob-supply = <&pmi8998_bob>;
+	regulator-names = "mic_bob";
+};
+
+&spmi_bus {
+	qcom,pmi8998@3{
+		qcom,leds@d000 {
+				compatible = "qcom,leds-qpnp";
+				reg = <0xd000 0x100>;
+				label = "rgb";
+				status = "okay";
+
+				qcom,rgb_0 {
+					label = "rgb";
+					qcom,id = <3>;
+					qcom,mode = "pwm";
+					pwms = <&pmi8998_pwm_5 0 0>;
+					qcom,start-idx = <0>;
+					qcom,idx-len = <16>;
+					qcom,duty-pcts = [00 00 00 00 00 00 00 00
+							00 00 00 00 00 00 64 64];
+					qcom,lut-flags = <3>;
+					qcom,pause-lo = <0>;
+					qcom,pause-hi = <0>;
+					qcom,ramp-step-ms = <255>;
+					qcom,max-current = <6>;
+					qcom,default-state = "on";
+					qcom,turn-off-delay-ms = <500>;
+					linux,default-trigger = "none";
+					qcom,pwm-us = <1000>;
+					linux,name = "red";
+					qcom,use-blink;
+				};
+
+				qcom,rgb_1 {
+					label = "rgb";
+					qcom,id = <4>;
+					qcom,mode = "pwm";
+					pwms = <&pmi8998_pwm_4 0 0>;
+					qcom,start-idx = <0>;
+					qcom,idx-len = <16>;
+					qcom,duty-pcts = [00 00 00 00 00 00 00 00
+							00 00 00 00 00 00 64 64];
+					qcom,lut-flags = <3>;
+					qcom,pause-lo = <0>;
+					qcom,pause-hi = <0>;
+					qcom,ramp-step-ms = <255>;
+					qcom,max-current = <6>;
+					qcom,default-state = "on";
+					qcom,turn-off-delay-ms = <500>;
+					linux,default-trigger = "none";
+					qcom,pwm-us = <1000>;
+					linux,name = "green";
+					qcom,use-blink;
+				};
+
+				qcom,rgb_2 {
+					label = "rgb";
+					qcom,id = <5>;
+					qcom,mode = "pwm";
+					pwms = <&pmi8998_pwm_3 0 0>;
+					qcom,pwm-us = <1000>;
+					qcom,max-current = <12>;
+					qcom,default-state = "off";
+					linux,name = "blue";
+				};
+			};
+		};
+	};
+

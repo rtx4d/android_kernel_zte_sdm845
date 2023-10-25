@@ -1,0 +1,28 @@
+/* for touchscreen and key */
+
+&soc {
+	i2c@a98000 {
+		synaptics@20 {
+			compatible = "synaptics,dsx-i2c";
+			reg = <0x20>;
+			interrupt-parent = <&tlmm>;
+			interrupts = <125 0x2008>;
+			vdd_ana-supply = <&pm8998_l28>;
+			vcc_i2c-supply = <&pm8998_l6>;
+			synaptics,pwr-reg-name = "vdd_ana";
+			synaptics,bus-reg-name = "vcc_i2c";
+			pinctrl-names = "pmx_ts_active", "pmx_ts_suspend";
+			pinctrl-0 = <&qupv3_se14_i2c_active>;
+			pinctrl-1 = <&qupv3_se14_i2c_sleep>;
+			synaptics,reset-gpio = <&tlmm 99 0x0>;
+			synaptics,irq-gpio = <&tlmm 125 0x0>;
+			synaptics,irq-on-state = <0>;
+			synaptics,irq-flags = <0x2008>; /* IRQF_ONESHOT | IRQF_TRIGGER_LOW */
+			synaptics,power-delay-ms = <100>;
+			synaptics,reset-delay-ms = <100>;
+			synaptics,reset-on-state = <0>;
+			synaptics,reset-active-ms = <20>;
+			synaptics,cap-button-codes = <158 102 187>;
+		};
+	};
+};
