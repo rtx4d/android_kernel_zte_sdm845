@@ -469,7 +469,7 @@ static int is_ramdump_enabled(struct subsys_device *dev)
 	if (dev->desc->ramdump_disable_gpio)
 		return !dev->desc->ramdump_disable;
 
-	return enable_ramdumps;
+	return 0;/*enable_ramdumps;*/
 }
 
 static void send_sysmon_notif(struct subsys_device *dev)
@@ -1069,7 +1069,7 @@ static void device_restart_work_hdlr(struct work_struct *work)
 	struct subsys_device *dev = container_of(work, struct subsys_device,
 							device_restart_work);
 
-	if (enable_ramdumps) {
+	if (0/*enable_ramdumps*/) {
 		struct subsys_device **list;
 		struct subsys_soc_restart_order *order = dev->restart_order;
 		unsigned count;

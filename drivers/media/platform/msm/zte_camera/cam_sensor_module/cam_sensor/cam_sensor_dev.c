@@ -198,8 +198,6 @@ static int32_t cam_sensor_driver_i2c_probe(struct i2c_client *client,
 	s_ctrl->bridge_intf.ops.apply_req = cam_sensor_apply_request;
 	s_ctrl->bridge_intf.ops.flush_req = cam_sensor_flush_request;
 
-	s_ctrl->sensordata->power_info.power_setting = NULL;
-	s_ctrl->sensordata->power_info.power_down_setting = NULL;
 	s_ctrl->sensordata->power_info.dev = soc_info->dev;
 	v4l2_set_subdevdata(&(s_ctrl->v4l2_dev_str.sd), s_ctrl);
 	return rc;

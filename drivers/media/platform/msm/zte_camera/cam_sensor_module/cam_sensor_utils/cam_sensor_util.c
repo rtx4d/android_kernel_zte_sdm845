@@ -658,15 +658,6 @@ int32_t cam_sensor_update_power_settings(void *cmd_buf,
 	}
 
 	power_info->power_setting_size = 0;
-	if (power_info->power_setting) {
-		kfree(power_info->power_setting);
-		power_info->power_setting = NULL;
-	}
-	if (power_info->power_down_setting) {
-		kfree(power_info->power_down_setting);
-		power_info->power_down_setting = NULL;
-	}
-
 	power_info->power_setting =
 		(struct cam_sensor_power_setting *)
 		kzalloc(sizeof(struct cam_sensor_power_setting) *

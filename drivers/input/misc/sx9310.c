@@ -27,12 +27,16 @@
 #include <linux/fb.h>
 #include <soc/qcom/socinfo.h> /*for pv-version check*/
 #include <linux/msm_drm_notify.h>
+#include <linux/proc_fs.h>
+#include <asm/uaccess.h>
 #define IDLE 0
 #define ACTIVE 1
 
 #define SX9310_TAG					"==ZTE-SX9310=="
 #define SX9310_DBG(fmt, args...)	printk(SX9310_TAG fmt, ##args)
 #define SX9310_DBG2(fmt, args...)
+
+#define SAR_GPIO_EINT_PIN	123
 
 static struct smtc_reg_data sx9310_i2c_reg_setup[] = {
 	{
@@ -395,8 +399,7 @@ static ssize_t status_show(struct device *dev, struct device_attribute *attr, ch
 	}
 }
 
-static DEVICE_ATTR(status, 0664, status_show,
-					NULL);
+static DEVICE_ATTR(status, 0664, status_show, NULL);
 
 static ssize_t enable_log_show(struct device *dev,
 					 struct device_attribute *attr, char *buf)
@@ -427,6 +430,40 @@ static ssize_t enable_log_store(struct device *dev,
 }
 static DEVICE_ATTR(enable_log, 0664, enable_log_show, enable_log_store);
 
+static ssize_t enable_show(struct device *dev,
+					 struct device_attribute *attr, char *buf)
+{
+	u8 reg_value = 0;
+	psx93XX_t chip = dev_get_drvdata(dev);
+
+	dev_dbg(chip->pdev, "Reading SX9310_IRQ_ENABLE_REG\n");
+	read_register(chip, SX9310_IRQ_ENABLE_REG, &reg_value);
+
+	return snprintf(buf, sizeof(buf) - 1, "%d\n", reg_value);
+}
+
+static ssize_t enable_store(struct device *dev,
+					 struct device_attribute *attr,
+					 const char *buf, size_t count)
+{
+	unsigned long val;
+	psx93XX_t chip = dev_get_drvdata(dev);
+
+	if (kstrtoul(buf, 0, &val))
+		return -EINVAL;
+
+	dev_dbg(chip->pdev, "enable_store val %d\n", (int)val);
+
+	if (val)	{
+		write_register(chip, SX9310_IRQ_ENABLE_REG, 0x60);
+	} else {
+		write_register(chip, SX9310_IRQ_ENABLE_REG, 0x00);
+	}
+
+	return count;
+}
+static DEVICE_ATTR(enable, 0664, enable_show, enable_store);
+
 static int read_regStat(psx93XX_t chip)
 {
 	u8 data = 0;
@@ -437,6 +474,156 @@ static int read_regStat(psx93XX_t chip)
 	}
 	return 0;
 }
+
+/*-----------------------dev_atrribute operations-------------------------------*/
+static ssize_t sx9310_register_write_store(struct device *dev,
+			struct device_attribute *attr, const char *buf, size_t count)
+{
+	int reg_address = 0, val = 0;
+	psx93XX_t this = dev_get_drvdata(dev);
+
+	if (sscanf(buf, "%x,%x", &reg_address, &val) != 2) {
+		pr_err("The number of data are wrong\n");
+		return -EINVAL;
+	}
+
+	write_register(this, (unsigned char)reg_address, (unsigned char)val);
+	dev_info(this->pdev, "%s - Register(0x%x) data(0x%x)\n", __func__, reg_address, val);
+
+	return count;
+}
+
+static ssize_t sx9310_register_read_store(struct device *dev,
+			   struct device_attribute *attr, const char *buf, size_t count)
+{
+	u8 val = 0;
+	int regist = 0;
+	psx93XX_t this = dev_get_drvdata(dev);
+	int val_gpio = -1;
+
+	dev_info(this->pdev, "Reading register\n");
+
+	if (kstrtoint(buf, 10, &regist) != 1) {
+		pr_err("The number of data are wrong\n");
+		return -EINVAL;
+	}
+
+	read_register(this, regist, &val);
+	dev_info(this->pdev, "%s - Register(0x%2x) data(0x%2x)\n", __func__, regist, val);
+
+	mdelay(50);
+	val_gpio = gpio_get_value(SAR_GPIO_EINT_PIN);
+	dev_info(this->pdev, "irq gpio val_gpio=%d\n", val_gpio);
+
+	return count;
+}
+
+
+static ssize_t sx9310_raw_data_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	u8 msb = 0, lsb = 0;
+	u8 i;
+	s32 useful;
+	s32 average;
+	s32 diff;
+	u16 offset;
+	psx93XX_t this = dev_get_drvdata(dev);
+
+	for (i = 0; i < 3; i++) {
+		write_register(this, SX9310_CPSRD, i);
+		read_register(this, SX9310_USEMSB, &msb);
+		read_register(this, SX9310_USELSB, &lsb);
+		useful = (s32)((msb << 8) | lsb);
+
+		read_register(this, SX9310_AVGMSB, &msb);
+		read_register(this, SX9310_AVGLSB, &lsb);
+		average = (s32)((msb << 8) | lsb);
+
+		read_register(this, SX9310_OFFSETMSB, &msb);
+		read_register(this, SX9310_OFFSETLSB, &lsb);
+		offset = (u16)((msb << 8) | lsb);
+
+		read_register(this, SX9310_DIFFMSB, &msb);
+		read_register(this, SX9310_DIFFLSB, &lsb);
+		diff = (s32)((msb << 8) | lsb);
+
+		if (useful > 32767)
+			useful -= 65536;
+		if (diff > 32767)
+			diff -= 65536;
+		if (average > 32767)
+			average -= 65536;
+		dev_info(this->pdev, "PH[%d]: Useful : %d Average : %d, Offset : %d, DIFF : %d\n",
+				i, useful, average, offset, diff);
+	}
+	return 0;
+}
+
+static ssize_t chipinfo_value_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	u8 reg_value[2] = {0};
+	psx93XX_t this = dev_get_drvdata(dev);
+
+	if (this == NULL) {
+		pr_err("i2c client is null!!\n");
+		return 0;
+	}
+
+	read_register(this, SX9310_WHOAMI_REG, &reg_value[0]);
+	return snprintf(buf, 128, "WHOAMI:%d\n", reg_value[0]);
+}
+
+static ssize_t diff_value_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	u8 msb = 0, lsb = 0;
+	s32 useful_cs1;
+	s32 average_cs1;
+	s32 diff_cs1;
+	psx93XX_t this = dev_get_drvdata(dev);
+
+	write_register(this, SX9310_CPSRD, 1);
+	read_register(this, SX9310_USEMSB, &msb);
+	read_register(this, SX9310_USELSB, &lsb);
+	useful_cs1 = (s32)((msb << 8) | lsb);
+
+	read_register(this, SX9310_AVGMSB, &msb);
+	read_register(this, SX9310_AVGLSB, &lsb);
+	average_cs1 = (s32)((msb << 8) | lsb);
+
+	read_register(this, SX9310_DIFFMSB, &msb);
+	read_register(this, SX9310_DIFFLSB, &lsb);
+	diff_cs1 = (s32)((msb << 8) | lsb);
+
+	if (useful_cs1 > 32767)
+		useful_cs1 -= 65536;
+	if (diff_cs1 > 32767)
+		diff_cs1 -= 65536;
+	if (average_cs1 > 32767)
+		average_cs1 -= 65536;
+
+	return snprintf(buf, 128, "%d,%d,%d\n",
+		useful_cs1, average_cs1, diff_cs1);
+	dev_info(this->pdev, "Useful1 : %d Average1 : %d, DIFF1 : %d\n",
+			useful_cs1, average_cs1, diff_cs1);
+	return 0;
+}
+
+static DEVICE_ATTR(register_write,  0664, NULL, sx9310_register_write_store);
+static DEVICE_ATTR(register_read, 0664, NULL, sx9310_register_read_store);
+static DEVICE_ATTR(raw_data, 0664, sx9310_raw_data_show, NULL);
+static DEVICE_ATTR(chipinfo, 0664, chipinfo_value_show, NULL);
+static DEVICE_ATTR(diff, 0664, diff_value_show, NULL);
+
+static struct attribute *sx9310_attributes[] = {
+	&dev_attr_register_write.attr,
+	&dev_attr_register_read.attr,
+	&dev_attr_raw_data.attr,
+	&dev_attr_chipinfo.attr,
+	NULL,
+};
+static struct attribute_group sx9310_attr_group = {
+	.attrs = sx9310_attributes,
+};
 
 static void hw_init(psx93XX_t chip)
 {
@@ -691,6 +878,7 @@ static int sx9310_probe(struct i2c_client *client, const struct i2c_device_id *i
 {
 	int i = 0;
 	int ret = 0;
+	int err = 0;
 	psx93XX_t chip = 0;
 	/* psx9310_t pDevice = 0;*/
 	/* psx9310_platform_data_t pplatData = 0; */
@@ -721,7 +909,13 @@ static int sx9310_probe(struct i2c_client *client, const struct i2c_device_id *i
 	device_create_file(chip->pdev, &dev_attr_reg);
 	device_create_file(chip->pdev, &dev_attr_status);
 	device_create_file(chip->pdev, &dev_attr_enable_log);
+	device_create_file(chip->pdev, &dev_attr_enable);
+	device_create_file(chip->pdev, &dev_attr_diff);
 
+	err = sysfs_create_group(&client->dev.kobj, &sx9310_attr_group);
+	if (err) {
+		return -ENOMEM;
+	}
 	/* Create the input device */
 	input = input_allocate_device();
 	if (!input) {
@@ -796,6 +990,9 @@ static int sx9310_remove(struct i2c_client *client)
 	device_remove_file(chip->pdev, &dev_attr_reg);
 	device_remove_file(chip->pdev, &dev_attr_status);
 	device_remove_file(chip->pdev, &dev_attr_enable_log);
+	device_remove_file(chip->pdev, &dev_attr_enable);
+	/*device_remove_file(chip->pdev, &dev_attr_disable_sar_in_call);*/
+	device_remove_file(chip->pdev, &dev_attr_diff);
 	}
 
 	if (chip) {

@@ -143,12 +143,12 @@ struct ipa_usb_xdci_chan_params {
 	/* transfer ring params */
 	enum gsi_chan_dir dir;
 	u16 xfer_ring_len;
+	u64 xfer_ring_base_addr;
 	struct ipa_usb_xdci_chan_scratch xfer_scratch;
 	u64 xfer_ring_base_addr_iova;
 	u32 data_buff_base_len;
+	u64 data_buff_base_addr;
 	u64 data_buff_base_addr_iova;
-	struct sg_table *sgt_xfer_rings;
-	struct sg_table *sgt_data_buff;
 };
 
 /**

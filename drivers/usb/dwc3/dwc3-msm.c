@@ -121,7 +121,7 @@ MODULE_PARM_DESC(override_usb_speed, "override for USB speed");
 #define GSI_DBL_ADDR_L(n)	((QSCRATCH_REG_OFFSET + 0x110) + (n*4))
 #define GSI_DBL_ADDR_H(n)	((QSCRATCH_REG_OFFSET + 0x120) + (n*4))
 #define GSI_RING_BASE_ADDR_L(n)	((QSCRATCH_REG_OFFSET + 0x130) + (n*4))
-#define GSI_RING_BASE_ADDR_H(n)	((QSCRATCH_REG_OFFSET + 0x144) + (n*4))
+#define GSI_RING_BASE_ADDR_H(n)	((QSCRATCH_REG_OFFSET + 0x140) + (n*4))
 
 #define	GSI_IF_STS	(QSCRATCH_REG_OFFSET + 0x1A4)
 #define	GSI_WR_CTRL_STATE_MASK	BIT(15)
@@ -939,8 +939,7 @@ static int gsi_startxfer_for_ep(struct usb_ep *ep)
 * @usb_ep - pointer to usb_ep instance.
 * @dbl_addr - Doorbell address obtained from IPA driver
 */
-static void gsi_store_ringbase_dbl_info(struct usb_ep *ep,
-        struct usb_gsi_request *request)
+static void gsi_store_ringbase_dbl_info(struct usb_ep *ep, u32 dbl_addr)
 {
 	struct dwc3_ep *dep = to_dwc3_ep(ep);
 	struct dwc3	*dwc = dep->dwc;
@@ -949,27 +948,11 @@ static void gsi_store_ringbase_dbl_info(struct usb_ep *ep,
 
 	dwc3_msm_write_reg(mdwc->base, GSI_RING_BASE_ADDR_L(n),
 			dwc3_trb_dma_offset(dep, &dep->trb_pool[0]));
+	dwc3_msm_write_reg(mdwc->base, GSI_DBL_ADDR_L(n), dbl_addr);
 
-	if (request->mapped_db_reg_phs_addr_lsb)
-		dma_unmap_resource(dwc->sysdev,
-			request->mapped_db_reg_phs_addr_lsb,
-			PAGE_SIZE, DMA_BIDIRECTIONAL, 0);
-
-	request->mapped_db_reg_phs_addr_lsb = dma_map_resource(dwc->sysdev,
-			(phys_addr_t)request->db_reg_phs_addr_lsb, PAGE_SIZE,
-			DMA_BIDIRECTIONAL, 0);
-	if (dma_mapping_error(dwc->sysdev, request->mapped_db_reg_phs_addr_lsb))
-		dev_err(mdwc->dev, "mapping error for db_reg_phs_addr_lsb\n");
-
-	dev_dbg(mdwc->dev, "ep:%s dbl_addr_lsb:%x mapped_dbl_addr_lsb:%llx\n",
-		ep->name, request->db_reg_phs_addr_lsb,
-		(unsigned long long)request->mapped_db_reg_phs_addr_lsb);
-
-	dwc3_msm_write_reg(mdwc->base, GSI_DBL_ADDR_L(n),
-			(u32)request->mapped_db_reg_phs_addr_lsb);
-	dev_dbg(mdwc->dev, "Ring Base Addr %d: %x (LSB)\n", n,
+	dev_dbg(mdwc->dev, "Ring Base Addr %d = %x", n,
 			dwc3_msm_read_reg(mdwc->base, GSI_RING_BASE_ADDR_L(n)));
-	dev_dbg(mdwc->dev, "GSI DB Addr %d: %x (LSB)\n", n,
+	dev_dbg(mdwc->dev, "GSI DB Addr %d = %x", n,
 			dwc3_msm_read_reg(mdwc->base, GSI_DBL_ADDR_L(n)));
 }
 
@@ -985,6 +968,9 @@ static void gsi_ring_db(struct usb_ep *ep, struct usb_gsi_request *request)
 	void __iomem *gsi_dbl_address_lsb;
 	void __iomem *gsi_dbl_address_msb;
 	dma_addr_t offset;
+	u64 dbl_addr = *((u64 *)request->buf_base_addr);
+	u32 dbl_lo_addr = (dbl_addr & 0xFFFFFFFF);
+	u32 dbl_hi_addr = (dbl_addr >> 32);
 	struct dwc3_ep *dep = to_dwc3_ep(ep);
 	struct dwc3	*dwc = dep->dwc;
 	struct dwc3_msm *mdwc = dev_get_drvdata(dwc->dev->parent);
@@ -992,19 +978,18 @@ static void gsi_ring_db(struct usb_ep *ep, struct usb_gsi_request *request)
 					: (request->num_bufs + 2);
 
 	gsi_dbl_address_lsb = devm_ioremap_nocache(mdwc->dev,
-	    request->db_reg_phs_addr_lsb, sizeof(u32));
+					dbl_lo_addr, sizeof(u32));
 	if (!gsi_dbl_address_lsb)
 		dev_dbg(mdwc->dev, "Failed to get GSI DBL address LSB\n");
 
 	gsi_dbl_address_msb = devm_ioremap_nocache(mdwc->dev,
-	    request->db_reg_phs_addr_msb, sizeof(u32));
+					dbl_hi_addr, sizeof(u32));
 	if (!gsi_dbl_address_msb)
 		dev_dbg(mdwc->dev, "Failed to get GSI DBL address MSB\n");
 
 	offset = dwc3_trb_dma_offset(dep, &dep->trb_pool[num_trbs-1]);
 	dev_dbg(mdwc->dev, "Writing link TRB addr: %pa to %pK (%x) for ep:%s\n",
-		&offset, gsi_dbl_address_lsb, request->db_reg_phs_addr_lsb,
-		ep->name);
+		&offset, gsi_dbl_address_lsb, dbl_lo_addr, ep->name);
 
 	writel_relaxed(offset, gsi_dbl_address_lsb);
 	writel_relaxed(0, gsi_dbl_address_msb);
@@ -1075,8 +1060,6 @@ static int gsi_prepare_trbs(struct usb_ep *ep, struct usb_gsi_request *req)
 	struct dwc3_trb *trb;
 	int num_trbs = (dep->direction) ? (2 * (req->num_bufs) + 2)
 					: (req->num_bufs + 2);
-	struct scatterlist *sg;
-	struct sg_table *sgt;
 
 	dep->trb_pool = dma_zalloc_coherent(dwc->sysdev,
 				num_trbs * sizeof(struct dwc3_trb),
@@ -1089,19 +1072,6 @@ static int gsi_prepare_trbs(struct usb_ep *ep, struct usb_gsi_request *req)
 	}
 
 	dep->num_trbs = num_trbs;
-	dma_get_sgtable(dwc->sysdev, &req->sgt_trb_xfer_ring, dep->trb_pool,
-		dep->trb_pool_dma, num_trbs * sizeof(struct dwc3_trb));
-
-	sgt = &req->sgt_trb_xfer_ring;
-	dev_dbg(dwc->dev, "%s(): trb_pool:%pK trb_pool_dma:%lx\n",
-		__func__, dep->trb_pool, (unsigned long)dep->trb_pool_dma);
-
-	for_each_sg(sgt->sgl, sg, sgt->nents, i)
-		dev_dbg(dwc->dev,
-			"%i: page_link:%lx offset:%x length:%x address:%lx\n",
-			i, sg->page_link, sg->offset, sg->length,
-			(unsigned long)sg->dma_address);
-
 	/* IN direction */
 	if (dep->direction) {
 		for (i = 0; i < num_trbs ; i++) {
@@ -1167,14 +1137,11 @@ static int gsi_prepare_trbs(struct usb_ep *ep, struct usb_gsi_request *req)
 		}
 	}
 
-	dev_dbg(dwc->dev, "%s: Initialized TRB Ring for %s\n",
-					__func__, dep->name);
-
+	pr_debug("%s: Initialized TRB Ring for %s\n", __func__, dep->name);
 	trb = &dep->trb_pool[0];
 	if (trb) {
 		for (i = 0; i < num_trbs; i++) {
-				dev_dbg(dwc->dev,
-					"TRB %d: ADDR:%lx bpl:%x bph:%x sz:%x ctl:%x\n",
+			pr_debug("TRB(%d): ADDRESS:%lx bpl:%x bph:%x size:%x ctrl:%x\n",
 				i, (unsigned long)dwc3_trb_dma_offset(dep,
 				&dep->trb_pool[i]), trb->bpl, trb->bph,
 				trb->size, trb->ctrl);
@@ -1191,7 +1158,7 @@ static int gsi_prepare_trbs(struct usb_ep *ep, struct usb_gsi_request *req)
 * @usb_ep - pointer to usb_ep instance.
 *
 */
-static void gsi_free_trbs(struct usb_ep *ep, struct usb_gsi_request *req)
+static void gsi_free_trbs(struct usb_ep *ep)
 {
 	struct dwc3_ep *dep = to_dwc3_ep(ep);
 	struct dwc3 *dwc = dep->dwc;
@@ -1208,7 +1175,6 @@ static void gsi_free_trbs(struct usb_ep *ep, struct usb_gsi_request *req)
 		dep->trb_pool = NULL;
 		dep->trb_pool_dma = 0;
 	}
-	sg_free_table(&req->sgt_trb_xfer_ring);
 }
 /*
 * Configures GSI EPs. For GSI EPs we need to set interrupter numbers.
@@ -1398,8 +1364,7 @@ static int dwc3_msm_gsi_ep_op(struct usb_ep *ep,
 		break;
 	case GSI_EP_OP_FREE_TRBS:
 		dev_dbg(mdwc->dev, "EP_OP_FREE_TRBS for %s\n", ep->name);
-		request = (struct usb_gsi_request *)op_data;
-		gsi_free_trbs(ep, request);
+		gsi_free_trbs(ep);
 		break;
 	case GSI_EP_OP_CONFIG:
 		request = (struct usb_gsi_request *)op_data;
@@ -1420,8 +1385,7 @@ static int dwc3_msm_gsi_ep_op(struct usb_ep *ep,
 		break;
 	case GSI_EP_OP_STORE_DBL_INFO:
 		dev_dbg(mdwc->dev, "EP_OP_STORE_DBL_INFO\n");
-		request = (struct usb_gsi_request *)op_data;
-		gsi_store_ringbase_dbl_info(ep, request);
+		gsi_store_ringbase_dbl_info(ep, *((u32 *)op_data));
 		break;
 	case GSI_EP_OP_ENABLE_GSI:
 		dev_dbg(mdwc->dev, "EP_OP_ENABLE_GSI\n");
@@ -2274,6 +2238,12 @@ static int dwc3_msm_suspend(struct dwc3_msm *mdwc)
 
 	/* Suspend SS PHY */
 	if (dwc->maximum_speed == USB_SPEED_SUPER) {
+		if (mdwc->in_host_mode) {
+			u32 reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
+
+			reg |= DWC3_GUSB3PIPECTL_DISRXDETU3;
+			dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
+		}
 		/* indicate phy about SS mode */
 		if (dwc3_msm_is_superspeed(mdwc))
 			mdwc->ss_phy->flags |= DEVICE_IN_SS_MODE;
@@ -2458,6 +2428,13 @@ static int dwc3_msm_resume(struct dwc3_msm *mdwc)
 		usb_phy_set_suspend(mdwc->ss_phy, 0);
 		mdwc->ss_phy->flags &= ~DEVICE_IN_SS_MODE;
 		mdwc->lpm_flags &= ~MDWC3_SS_PHY_SUSPEND;
+
+		if (mdwc->in_host_mode) {
+			u32 reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
+
+			reg &= ~DWC3_GUSB3PIPECTL_DISRXDETU3;
+			dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
+		}
 	}
 
 	mdwc->hs_phy->flags &= ~(PHY_HSFS_MODE | PHY_LS_MODE);

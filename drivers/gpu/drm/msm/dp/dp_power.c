@@ -512,13 +512,13 @@ static int dp_power_init(struct dp_power *dp_power, bool flip)
 	rc = dp_parser_pinctrl(power->parser);
 	if (rc) {
 		pr_err("failed to parse pinctrl\n");
-		goto err_pinctrl_parse;
+		goto err_pinctrl;
 	}
 
 	rc = dp_power_pinctrl_set(power, true);
 	if (rc) {
 		pr_err("failed to set pinctrl state\n");
-		goto err_pinctrl_set;
+		goto err_pinctrl;
 	}
 
 	rc = dp_power_config_gpios(power, flip, true);
@@ -548,9 +548,7 @@ err_sde_power:
 	dp_power_config_gpios(power, flip, false);
 err_gpio:
 	dp_power_pinctrl_set(power, false);
-err_pinctrl_set:
-	dp_release_pinctrl(power->parser);
-err_pinctrl_parse:
+err_pinctrl:
 	dp_power_regulator_ctrl(power, false);
 exit:
 	return rc;

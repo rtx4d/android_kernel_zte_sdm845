@@ -34,13 +34,13 @@
 #define GSI_MAX_CTRL_PKT_SIZE 4096
 #define GSI_CTRL_DTR (1 << 0)
 
-#define GSI_NUM_IN_RNDIS_BUFFERS 50
+
 #define GSI_NUM_IN_BUFFERS 15
 #define GSI_IN_BUFF_SIZE 2048
 #define GSI_NUM_OUT_BUFFERS 14
 #define GSI_OUT_AGGR_SIZE 24576
 
-#define GSI_IN_RNDIS_AGGR_SIZE 16384
+#define GSI_IN_RNDIS_AGGR_SIZE 9216
 #define GSI_IN_MBIM_AGGR_SIZE 16384
 #define GSI_IN_RMNET_AGGR_SIZE 16384
 #define GSI_ECM_AGGR_SIZE 2048
@@ -232,6 +232,10 @@ struct gsi_data_port {
 	struct ipa_usb_teth_params ipa_init_params;
 	int in_channel_handle;
 	int out_channel_handle;
+	u32 in_db_reg_phs_addr_lsb;
+	u32 in_db_reg_phs_addr_msb;
+	u32 out_db_reg_phs_addr_lsb;
+	u32 out_db_reg_phs_addr_msb;
 	u32 in_xfer_rsc_index;
 	u32 out_xfer_rsc_index;
 	u16 in_last_trb_addr;
@@ -276,7 +280,6 @@ struct f_gsi {
 	struct gsi_data_port d_port;
 	struct gsi_ctrl_port c_port;
 	void *ipc_log_ctxt;
-	bool rmnet_dtr_status;
 };
 
 static inline struct f_gsi *func_to_gsi(struct usb_function *f)

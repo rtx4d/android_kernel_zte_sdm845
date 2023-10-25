@@ -60,7 +60,7 @@
 #define SX9310_SARMSB         0x39
 #define SX9310_SARLSB         0x3A
 
-
+#define SX9310_WHOAMI_REG         0x42
 
 /*      IrqStat 0:Inactive 1:Active     */
 #define SX9310_IRQSTAT_RESET_FLAG      0x80
