@@ -561,8 +561,8 @@ static int diagchar_close(struct inode *inode, struct file *file)
 {
 	int ret;
 
-	DIAG_LOG(DIAG_DEBUG_USERSPACE, "diag: %s process exit with pid = %d\n",
-		current->comm, current->tgid);
+	DIAG_LOG(DIAG_DEBUG_USERSPACE, "diag: process exit %s\n",
+		current->comm);
 	ret = diag_remove_client_entry(file);
 	mutex_lock(&driver->diag_maskclear_mutex);
 	driver->mask_clear = 0;
@@ -1168,19 +1168,15 @@ static int diag_process_userspace_remote(int proc, void *buf, int len)
 }
 #endif
 
-static int mask_request_validate(unsigned char mask_buf[], int len)
+static int mask_request_validate(unsigned char mask_buf[])
 {
 	uint8_t packet_id;
 	uint8_t subsys_id;
 	uint16_t ss_cmd;
 
-	if (len <= 0)
-		return 0;
 	packet_id = mask_buf[0];
 
 	if (packet_id == DIAG_CMD_DIAG_SUBSYS_DELAY) {
-		if (len < 2*sizeof(uint8_t) + sizeof(uint16_t))
-			return 0;
 		subsys_id = mask_buf[1];
 		ss_cmd = *(uint16_t *)(mask_buf + 2);
 		switch (subsys_id) {
@@ -1196,8 +1192,6 @@ static int mask_request_validate(unsigned char mask_buf[], int len)
 			return 0;
 		}
 	} else if (packet_id == 0x4B) {
-		if (len < 2*sizeof(uint8_t) + sizeof(uint16_t))
-			return 0;
 		subsys_id = mask_buf[1];
 		ss_cmd = *(uint16_t *)(mask_buf + 2);
 		/* Packets with SSID which are allowed */
@@ -1283,8 +1277,7 @@ static void diag_md_session_exit(void)
 			diag_log_mask_free(session_info->log_mask);
 			kfree(session_info->log_mask);
 			session_info->log_mask = NULL;
-			diag_msg_mask_free(session_info->msg_mask,
-				session_info);
+			diag_msg_mask_free(session_info->msg_mask);
 			kfree(session_info->msg_mask);
 			session_info->msg_mask = NULL;
 			diag_event_mask_free(session_info->event_mask);
@@ -1355,9 +1348,7 @@ int diag_md_session_create(int mode, int peripheral_mask, int proc)
 			 "return value of event copy. err %d\n", err);
 		goto fail_peripheral;
 	}
-	new_session->msg_mask_tbl_count = 0;
-	err = diag_msg_mask_copy(new_session, new_session->msg_mask,
-		&msg_mask);
+	err = diag_msg_mask_copy(new_session->msg_mask, &msg_mask);
 	if (err) {
 		DIAG_LOG(DIAG_DEBUG_USERSPACE,
 			 "return value of msg copy. err %d\n", err);
@@ -1393,8 +1384,7 @@ fail_peripheral:
 	diag_event_mask_free(new_session->event_mask);
 	kfree(new_session->event_mask);
 	new_session->event_mask = NULL;
-	diag_msg_mask_free(new_session->msg_mask,
-		new_session);
+	diag_msg_mask_free(new_session->msg_mask);
 	kfree(new_session->msg_mask);
 	new_session->msg_mask = NULL;
 	kfree(new_session);
@@ -1422,8 +1412,7 @@ static void diag_md_session_close(int pid)
 	diag_log_mask_free(session_info->log_mask);
 	kfree(session_info->log_mask);
 	session_info->log_mask = NULL;
-	diag_msg_mask_free(session_info->msg_mask,
-		session_info);
+	diag_msg_mask_free(session_info->msg_mask);
 	kfree(session_info->msg_mask);
 	session_info->msg_mask = NULL;
 	diag_event_mask_free(session_info->event_mask);
@@ -2936,8 +2925,7 @@ static int diag_user_process_raw_data(const char __user *buf, int len)
 	}
 
 	/* Check for proc_type */
-	if (len >= sizeof(int))
-		remote_proc = diag_get_remote(*(int *)user_space_data);
+	remote_proc = diag_get_remote(*(int *)user_space_data);
 	if (remote_proc) {
 		token_offset = sizeof(int);
 		if (len <= MIN_SIZ_ALLOW) {
@@ -2951,7 +2939,7 @@ static int diag_user_process_raw_data(const char __user *buf, int len)
 	}
 	if (driver->mask_check) {
 		if (!mask_request_validate(user_space_data +
-						token_offset, len)) {
+						token_offset)) {
 			pr_alert("diag: mask request Invalid\n");
 			diagmem_free(driver, user_space_data, mempool);
 			user_space_data = NULL;
@@ -3029,7 +3017,7 @@ static int diag_user_process_userspace_data(const char __user *buf, int len)
 	/* Check masks for On-Device logging */
 	if (driver->mask_check) {
 		if (!mask_request_validate(driver->user_space_data_buf +
-					   token_offset, len)) {
+					   token_offset)) {
 			pr_alert("diag: mask request Invalid\n");
 			return -EFAULT;
 		}
@@ -3176,8 +3164,6 @@ static ssize_t diagchar_read(struct file *file, char __user *buf, size_t count,
 	int exit_stat = 0;
 	int write_len = 0;
 	struct diag_md_session_t *session_info = NULL;
-	struct pid *pid_struct = NULL;
-	struct task_struct *task_s = NULL;
 
 	mutex_lock(&driver->diagchar_mutex);
 	for (i = 0; i < driver->num_clients; i++)
@@ -3422,19 +3408,8 @@ exit:
 		list_for_each_safe(start, temp, &driver->dci_client_list) {
 			entry = list_entry(start, struct diag_dci_client_tbl,
 									track);
-			pid_struct = find_get_pid(entry->tgid);
-			if (!pid_struct)
+			if (entry->client->tgid != current->tgid)
 				continue;
-			task_s = get_pid_task(pid_struct, PIDTYPE_PID);
-			if (!task_s) {
-				DIAG_LOG(DIAG_DEBUG_DCI,
-				"diag: valid task doesn't exist for pid = %d\n",
-				entry->tgid);
-				continue;
-			}
-			if (task_s == entry->client)
-				if (entry->client->tgid != current->tgid)
-					continue;
 			if (!entry->in_service)
 				continue;
 			if (copy_to_user(buf + ret, &data_type, sizeof(int))) {

@@ -13,7 +13,6 @@
 #include <dt-bindings/spmi/spmi.h>
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/thermal/thermal.h>
-
 &spmi_bus {
 	pmi8998_lsid0: qcom,pmi8998@2 {
 		compatible = "qcom,spmi-pmic";
@@ -99,11 +98,15 @@
 			qcom,boost-threshold-ua = <100000>;
 			qcom,wipower-max-uw = <5000000>;
 			dpdm-supply = <&qusb_phy0>;
-
+			qcom,fcc-max-ua = <3000000>;
+			qcom,fv-max-uv = <4450000>;
+			qcom,usb-icl-ua = <2500000>;
+			qcom,dc-icl-ua = <1100000>;
 			qcom,thermal-mitigation
 					= <3000000 1500000 1000000 500000>;
 			qcom,auto-recharge-soc;
 			qcom,suspend-input-on-debug-batt;
+			qcom,sw-jeita-enable;
 
 			qcom,chgr@1000 {
 				reg = <0x1000 0x100>;
@@ -221,7 +224,7 @@
 			compatible = "qcom,qpnp-pdphy";
 			reg = <0x1700 0x100>;
 			vdd-pdphy-supply = <&pm8998_l24>;
-			vbus-supply = <&ext_5v_boost>;
+			vbus-supply = <&smb2_vbus>;
 			vconn-supply = <&smb2_vconn>;
 			interrupts = <0x2 0x17 0x0 IRQ_TYPE_EDGE_RISING>,
 				     <0x2 0x17 0x1 IRQ_TYPE_EDGE_RISING>,
@@ -832,7 +835,7 @@
 
 		trips {
 			low_soc: low-soc {
-				temperature = <10>;
+				temperature = <0>;
 				hysteresis = <0>;
 				type = "passive";
 			};

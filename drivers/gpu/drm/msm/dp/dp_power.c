@@ -509,10 +509,16 @@ static int dp_power_init(struct dp_power *dp_power, bool flip)
 		goto exit;
 	}
 
+	rc = dp_parser_pinctrl(power->parser);
+	if (rc) {
+		pr_err("failed to parse pinctrl\n");
+		goto err_pinctrl_parse;
+	}
+
 	rc = dp_power_pinctrl_set(power, true);
 	if (rc) {
 		pr_err("failed to set pinctrl state\n");
-		goto err_pinctrl;
+		goto err_pinctrl_set;
 	}
 
 	rc = dp_power_config_gpios(power, flip, true);
@@ -542,7 +548,9 @@ err_sde_power:
 	dp_power_config_gpios(power, flip, false);
 err_gpio:
 	dp_power_pinctrl_set(power, false);
-err_pinctrl:
+err_pinctrl_set:
+	dp_release_pinctrl(power->parser);
+err_pinctrl_parse:
 	dp_power_regulator_ctrl(power, false);
 exit:
 	return rc;
@@ -575,11 +583,14 @@ static int dp_power_deinit(struct dp_power *dp_power)
 			power->dp_core_client, false);
 	if (rc) {
 		pr_err("Power resource enable failed, rc=%d\n", rc);
+		dp_release_pinctrl(power->parser);
 		goto exit;
 	}
 	dp_power_config_gpios(power, false, false);
 	dp_power_pinctrl_set(power, false);
 	dp_power_regulator_ctrl(power, false);
+	dp_release_pinctrl(power->parser);
+
 exit:
 	return rc;
 }

@@ -166,6 +166,10 @@ int32_t cam_qup_i2c_write_table(
 	struct camera_io_master *client,
 	struct cam_sensor_i2c_reg_setting *write_setting);
 
+int32_t cam_cci_i2c_write(struct camera_io_master *client,
+	uint32_t addr, uint32_t data, enum camera_sensor_i2c_type addr_type,
+	enum camera_sensor_i2c_type data_type);
+
 /**
  * cam_qup_i2c_write_continuous_write: QUP based I2C write continuous(Burst/Seq)
  * @client: QUP I2C client structure

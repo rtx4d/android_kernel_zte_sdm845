@@ -69,6 +69,22 @@ config DRM_MSM_DSI_STAGING
 	  Interface and DSI stands for Display Serial Interface which powers
 	  the primary display of your mobile device.
 
+config IRIS2P_FULL_SUPPORT
+	bool "Enable IRIS2P support"
+	default n
+	help
+	  Choose this option if to enable Iris2p chip support.
+
+config ZTE_LCD_COMMON_FUNCTION
+	bool "Enable zte lcd function"
+	default y
+	help
+	  Choose this option if use zte lcd function.
+
+config ZTE_LCD_BACKLIGHT_LEVEL_CURVE
+	depends on ZTE_LCD_COMMON_FUNCTION
+	bool "Support for ZTE lcd backlight curve"
+
 config DRM_MSM_DSI_PLL
 	bool "Enable DSI PLL driver in MSM DRM"
 	depends on DRM_MSM_DSI && COMMON_CLK
@@ -149,3 +165,9 @@ config DRM_SDE_RSC
           avoids the display core power collapse. A client can also register
           for display core power collapse events on rsc.
 
+config ZTE_LCD_DCSBL_CABC_GRADIENT
+	bool "Enable gradient backlight control by setting the 53 register"
+	depends on DRM_MSM
+	default n
+	help
+	Choose this option if to enable gradient backlight

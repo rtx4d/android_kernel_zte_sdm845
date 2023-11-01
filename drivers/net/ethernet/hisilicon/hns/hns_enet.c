@@ -1415,7 +1415,7 @@ static netdev_tx_t hns_nic_net_xmit(struct sk_buff *skb,
 	assert(skb->queue_mapping < ndev->ae_handle->q_num);
 
 	return hns_nic_net_xmit_hw(ndev, skb,
-				   &tx_ring_data(priv, skb->queue_mapping));
+			&tx_ring_data(priv, skb->queue_mapping));
 }
 
 static int hns_nic_change_mtu(struct net_device *ndev, int new_mtu)

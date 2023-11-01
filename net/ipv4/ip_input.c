@@ -148,6 +148,10 @@
 #include <linux/netlink.h>
 #include <net/dst_metadata.h>
 
+/*ZTE_LC_IP_DEBUG, 20130509 start*/
+extern int tcp_socket_debugfs;
+extern int ip_log_pm;        /* ZTE_PM_TCP  lcf@20160523 */
+/*ZTE_LC_IP_DEBUG, 20130509 end*/
 /*
  *	Process Router Attention IP option (RFC 2113)
  */
@@ -484,6 +488,30 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 	/* Must drop socket now because of tproxy. */
 	skb_orphan(skb);
 
+/*ZTE_LC_IP_DEBUG, 20130509 start*/
+	if ((tcp_socket_debugfs & 0x00000001) || ip_log_pm == 1) {       /*ZTE_PM_TCP  lcf@20160523 */
+/*here it is IPV4 */
+/*regardless swapper process, loop device */
+		if (iph->daddr != htonl(INADDR_LOOPBACK)) {
+			if (iph->protocol == IPPROTO_ICMP) {
+				struct icmphdr *icmph = (struct icmphdr *)(skb->data + (iph->ihl << 2));
+/*ignore checking icmp pkts correct*/
+				pr_info("[IP]  ICMP RCV len=%d, Gpid:%d (%s), (%pI4 -> %pI4) , T: %d,C: %d\n",
+					ntohs(iph->tot_len),
+					current->group_leader->pid, current->group_leader->comm,
+					&iph->daddr,
+					&iph->saddr,
+					icmph->type, icmph->code);
+			} else if (iph->protocol != IPPROTO_UDP && iph->protocol != IPPROTO_TCP)
+				pr_info("[IP]  RCV len=%d, Gpid:%d (%s), (%pI4 -> %pI4), TP = %d\n",
+					ntohs(iph->tot_len),
+					current->group_leader->pid, current->group_leader->comm,
+					&iph->daddr,
+					&iph->saddr,
+					iph->protocol);
+		}
+	}
+/*ZTE_LC_IP_DEBUG, 20130509 end*/
 	return NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,
 		       net, NULL, skb, dev, NULL,
 		       ip_rcv_finish);

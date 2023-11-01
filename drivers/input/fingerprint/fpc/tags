@@ -1,0 +1,57 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.9~svn20110310	//
+FPC_TTW_HOLD_TIME	fpc1020_tee.c	40;"	d	file:
+NUM_PARAMS_REG_ENABLE_SET	fpc1020_tee.c	51;"	d	file:
+PWR_ON_SLEEP_MAX_US	fpc1020_tee.c	49;"	d	file:
+PWR_ON_SLEEP_MIN_US	fpc1020_tee.c	48;"	d	file:
+RESET_HIGH_SLEEP1_MAX_US	fpc1020_tee.c	45;"	d	file:
+RESET_HIGH_SLEEP1_MIN_US	fpc1020_tee.c	44;"	d	file:
+RESET_HIGH_SLEEP2_MAX_US	fpc1020_tee.c	47;"	d	file:
+RESET_HIGH_SLEEP2_MIN_US	fpc1020_tee.c	46;"	d	file:
+RESET_LOW_SLEEP_MAX_US	fpc1020_tee.c	43;"	d	file:
+RESET_LOW_SLEEP_MIN_US	fpc1020_tee.c	42;"	d	file:
+attribute_group	fpc1020_tee.c	/^static const struct attribute_group attribute_group = {$/;"	v	typeref:struct:attribute_group	file:
+attributes	fpc1020_tee.c	/^static struct attribute *attributes[] = {$/;"	v	typeref:struct:attribute	file:
+clk_enable_set	fpc1020_tee.c	/^static ssize_t clk_enable_set(struct device *dev,$/;"	f	file:
+dev	fpc1020_tee.c	/^	struct device *dev;$/;"	m	struct:fpc1020_data	typeref:struct:fpc1020_data::device	file:
+device_prepare	fpc1020_tee.c	/^static int device_prepare(struct fpc1020_data *fpc1020, bool enable)$/;"	f	file:
+device_prepare_set	fpc1020_tee.c	/^static ssize_t device_prepare_set(struct device *dev,$/;"	f	file:
+fingerprint_pinctrl	fpc1020_tee.c	/^	struct pinctrl *fingerprint_pinctrl;$/;"	m	struct:fpc1020_data	typeref:struct:fpc1020_data::pinctrl	file:
+fpc1020_data	fpc1020_tee.c	/^struct fpc1020_data {$/;"	s	file:
+fpc1020_driver	fpc1020_tee.c	/^static struct platform_driver fpc1020_driver = {$/;"	v	typeref:struct:platform_driver	file:
+fpc1020_exit	fpc1020_tee.c	/^module_exit(fpc1020_exit);$/;"	v
+fpc1020_exit	fpc1020_tee.c	/^static void __exit fpc1020_exit(void)$/;"	f	file:
+fpc1020_init	fpc1020_tee.c	/^module_init(fpc1020_init);$/;"	v
+fpc1020_init	fpc1020_tee.c	/^static int __init fpc1020_init(void)$/;"	f	file:
+fpc1020_irq_handler	fpc1020_tee.c	/^static irqreturn_t fpc1020_irq_handler(int irq, void *handle)$/;"	f	file:
+fpc1020_of_match	fpc1020_tee.c	/^static const struct of_device_id fpc1020_of_match[] = {$/;"	v	typeref:struct:of_device_id	file:
+fpc1020_probe	fpc1020_tee.c	/^static int fpc1020_probe(struct platform_device *pdev)$/;"	f	file:
+fpc1020_remove	fpc1020_tee.c	/^static int fpc1020_remove(struct platform_device *pdev)$/;"	f	file:
+fpc1020_request_named_gpio	fpc1020_tee.c	/^static int fpc1020_request_named_gpio(struct fpc1020_data *fpc1020,$/;"	f	file:
+hw_reset	fpc1020_tee.c	/^static int hw_reset(struct fpc1020_data *fpc1020)$/;"	f	file:
+hw_reset_set	fpc1020_tee.c	/^static ssize_t hw_reset_set(struct device *dev,$/;"	f	file:
+irq_ack	fpc1020_tee.c	/^static ssize_t irq_ack(struct device *dev,$/;"	f	file:
+irq_get	fpc1020_tee.c	/^static ssize_t irq_get(struct device *dev,$/;"	f	file:
+irq_gpio	fpc1020_tee.c	/^	int irq_gpio;$/;"	m	struct:fpc1020_data	file:
+lock	fpc1020_tee.c	/^	struct mutex lock; \/* To set\/get exported values in sysfs *\/$/;"	m	struct:fpc1020_data	typeref:struct:fpc1020_data::mutex	file:
+name	fpc1020_tee.c	/^	char *name;$/;"	m	struct:vreg_config	file:
+obj-y	Makefile	/^obj-y := fpc1020_tee.o$/;"	m
+pctl_names	fpc1020_tee.c	/^static const char * const pctl_names[] = {$/;"	v	file:
+pinctl_set	fpc1020_tee.c	/^static ssize_t pinctl_set(struct device *dev,$/;"	f	file:
+pinctrl_state	fpc1020_tee.c	/^	struct pinctrl_state *pinctrl_state[ARRAY_SIZE(pctl_names)];$/;"	m	struct:fpc1020_data	typeref:struct:fpc1020_data::pinctrl_state	file:
+prepared	fpc1020_tee.c	/^	bool prepared;$/;"	m	struct:fpc1020_data	file:
+pwr_gpio	fpc1020_tee.c	/^	int pwr_gpio;$/;"	m	struct:fpc1020_data	file:
+regulator_enable_set	fpc1020_tee.c	/^static ssize_t regulator_enable_set(struct device *dev,$/;"	f	file:
+rst_gpio	fpc1020_tee.c	/^	int rst_gpio;$/;"	m	struct:fpc1020_data	file:
+select_pin_ctl	fpc1020_tee.c	/^static int select_pin_ctl(struct fpc1020_data *fpc1020, const char *name)$/;"	f	file:
+ttw_wl	fpc1020_tee.c	/^	struct wake_lock ttw_wl;$/;"	m	struct:fpc1020_data	typeref:struct:fpc1020_data::wake_lock	file:
+ua_load	fpc1020_tee.c	/^	int ua_load;$/;"	m	struct:vreg_config	file:
+vmax	fpc1020_tee.c	/^	unsigned long vmax;$/;"	m	struct:vreg_config	file:
+vmin	fpc1020_tee.c	/^	unsigned long vmin;$/;"	m	struct:vreg_config	file:
+vreg_config	fpc1020_tee.c	/^struct vreg_config {$/;"	s	file:
+wakeup_enable_set	fpc1020_tee.c	/^static ssize_t wakeup_enable_set(struct device *dev,$/;"	f	file:
+wakeup_enabled	fpc1020_tee.c	/^	atomic_t wakeup_enabled; \/* Used both in ISR and non-ISR *\/$/;"	m	struct:fpc1020_data	file:

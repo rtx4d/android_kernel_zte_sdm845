@@ -70,6 +70,15 @@ int msm_drm_unregister_client(struct notifier_block *nb)
  */
 static int msm_drm_notifier_call_chain(unsigned long val, void *v)
 {
+/*zte modify for tp no work after disconnent hdmi and cast start*/
+	struct msm_drm_notifier *notifier = (struct msm_drm_notifier *)v;
+
+	if (notifier->id != 0) {
+		pr_warn("%s, val: %lu, ctrc_index: %d, ignore!\n", __func__, val, notifier->id);
+		return NOTIFY_DONE;
+	}
+/*zte modify for tp no work after disconnent hdmi and cast end*/
+
 	return blocking_notifier_call_chain(&msm_drm_notifier_list, val,
 					    v);
 }
@@ -209,8 +218,10 @@ msm_disable_outputs(struct drm_device *dev, struct drm_atomic_state *old_state)
 			funcs->dpms(encoder, DRM_MODE_DPMS_OFF);
 
 		drm_bridge_post_disable(encoder->bridge);
+
 		msm_drm_notifier_call_chain(MSM_DRM_EVENT_BLANK,
 					    &notifier_data);
+
 	}
 
 	for_each_crtc_in_state(old_state, crtc, old_crtc_state, i) {
@@ -450,6 +461,7 @@ static void msm_atomic_helper_commit_modeset_enables(struct drm_device *dev,
 				 encoder->base.id, encoder->name);
 
 		drm_bridge_enable(encoder->bridge);
+
 		msm_drm_notifier_call_chain(MSM_DRM_EVENT_BLANK,
 					    &notifier_data);
 	}

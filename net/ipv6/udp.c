@@ -849,6 +849,15 @@ int __udp6_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
 		/* a return value > 0 means to resubmit the input */
 		if (ret > 0)
 			return ret;
+		if (tcp_socket_debugfs & 0x00000002) {    /*ZTE_LC_TCP_DEBUG, 20170418 improved*/
+			if (!ip_hdr(skb))
+				pr_info("[IPv6] UDP RCV len=%d, "
+					"Gpid:%d (%s), (%pI6 :%hu <- %pI6 :%hu)\n",
+					ulen,
+					current->group_leader->pid, current->group_leader->comm,
+					&ip_hdr(skb)->daddr, ntohs(uh->dest),
+					&ip_hdr(skb)->saddr, ntohs(uh->source));
+		}
 
 		return 0;
 	}

@@ -72,6 +72,7 @@
 #include <linux/fault-inject.h>
 #include "ufs.h"
 #include "ufshci.h"
+#include <scsi/scsi_device.h>
 
 #define UFSHCD "ufshcd"
 #define UFSHCD_DRIVER_VERSION "0.3"
@@ -256,6 +257,7 @@ struct ufs_desc_size {
 	int interc_desc;
 	int unit_desc;
 	int conf_desc;
+	int health_desc;
 };
 
 /**

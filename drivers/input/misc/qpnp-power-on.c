@@ -32,6 +32,8 @@
 #include <linux/regulator/of_regulator.h>
 #include <linux/input/qpnp-power-on.h>
 #include <linux/power_supply.h>
+#include <linux/reboot.h>
+#include <soc/qcom/socinfo.h>
 
 #define PMIC_VER_8941           0x01
 #define PMIC_VERSION_REG        0x0105
@@ -221,12 +223,31 @@ struct qpnp_pon {
 	bool			store_hard_reset_reason;
 	bool			kpdpwr_dbc_enable;
 	ktime_t			kpdpwr_last_release_time;
+	/*ZTE ADD for BOOT_MODE start*/
+	struct timer_list timer;
+	struct work_struct pwrkey_poweroff_work;
+	/*ZTE ADD for BOOT_MODE end*/
 };
 
 static int pon_ship_mode_en;
 module_param_named(
 	ship_mode_en, pon_ship_mode_en, int, 0600
 );
+
+/*ZTE ADD for BOOT_MODE start*/
+static void pwrkey_timer(unsigned long data)
+{
+	struct qpnp_pon *pon = (struct qpnp_pon *)data;
+
+	schedule_work(&pon->pwrkey_poweroff_work);
+}
+
+static void pwrkey_poweroff(struct work_struct *work)
+{
+	pr_info("%s: power key long pressed, trigger reboot\n", __func__);
+	kernel_restart("LONGPRESS");
+}
+/*ZTE ADD for BOOT_MODE end*/
 
 static struct qpnp_pon *sys_reset_dev;
 static DEFINE_SPINLOCK(spon_list_slock);
@@ -793,6 +814,26 @@ qpnp_get_cfg(struct qpnp_pon *pon, u32 pon_type)
 	return NULL;
 }
 
+/*ZTE ADD for BOOT_MODE start*/
+extern int socinfo_get_ftm_flag(void);
+void zte_set_timer(struct qpnp_pon *pon)
+{
+	if (socinfo_get_ftm_flag() == 1) {
+		pon->timer.expires = jiffies + 3 * HZ;
+		pr_info("%s: FTM mode,start 3s timer for reboot\n", __func__);
+	} else {
+		#ifdef CONFIG_ZTE_PWRKEY_HARDRESET_TIMEOUT
+			pon->timer.expires = jiffies + CONFIG_ZTE_PWRKEY_HARDRESET_TIMEOUT * HZ;
+			pr_info("%s: Normal mode,start 16s timer for reboot\n", __func__);
+		#else
+			pon->timer.expires = jiffies + 10 * HZ;
+			pr_info("%s: Normal mode,start 10s timer for reboot\n", __func__);
+		#endif
+	}
+	mod_timer(&pon->timer, pon->timer.expires);
+}
+/*ZTE ADD for BOOT_MODE end*/
+
 static int
 qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 {
@@ -866,6 +907,13 @@ qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 	input_sync(pon->pon_input);
 
 	cfg->old_state = !!key_status;
+
+/*ZTE ADD for BOOT_MODE start*/
+	if ((cfg->pon_type == PON_KPDPWR) && key_status)
+		zte_set_timer(pon);
+	else
+		del_timer(&pon->timer);
+/*ZTE ADD for BOOT_MODE end*/
 
 	return 0;
 }
@@ -2253,6 +2301,13 @@ static int qpnp_pon_probe(struct platform_device *pdev)
 	dev_set_drvdata(&pdev->dev, pon);
 
 	INIT_DELAYED_WORK(&pon->bark_work, bark_work_func);
+
+	/*ZTE ADD for BOOT_MODE start*/
+	init_timer(&pon->timer);
+	pon->timer.data = (unsigned long)pon;
+	pon->timer.function = pwrkey_timer;
+	INIT_WORK(&pon->pwrkey_poweroff_work, pwrkey_poweroff);
+	/*ZTE ADD for BOOT_MODE end*/
 
 	/* register the PON configurations */
 	rc = qpnp_pon_config_init(pon);

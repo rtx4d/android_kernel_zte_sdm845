@@ -3,7 +3,7 @@
  *
  * This code is based on drivers/scsi/ufs/ufshcd.c
  * Copyright (C) 2011-2013 Samsung India Software Operations
- * Copyright (c) 2013-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
  *
  * Authors:
  *	Santosh Yaraganavi <santosh.sy@samsung.com>
@@ -3382,7 +3382,6 @@ static int ufshcd_exec_dev_cmd(struct ufs_hba *hba,
 	int tag;
 	struct completion wait;
 	unsigned long flags;
-	bool has_read_lock = false;
 
 	/*
 	 * May get invoked from shutdown and IOCTL contexts.
@@ -3390,10 +3389,8 @@ static int ufshcd_exec_dev_cmd(struct ufs_hba *hba,
 	 * In error recovery context, it may come with lock acquired.
 	 */
 
-	if (!ufshcd_is_shutdown_ongoing(hba) && !ufshcd_eh_in_progress(hba)) {
+	if (!ufshcd_is_shutdown_ongoing(hba) && !ufshcd_eh_in_progress(hba))
 		down_read(&hba->lock);
-		has_read_lock = true;
-	}
 
 	/*
 	 * Get free slot, sleep if slots are unavailable.
@@ -3426,7 +3423,7 @@ static int ufshcd_exec_dev_cmd(struct ufs_hba *hba,
 out_put_tag:
 	ufshcd_put_dev_cmd_tag(hba, tag);
 	wake_up(&hba->dev_cmd.tag_wq);
-	if (has_read_lock)
+	if (!ufshcd_is_shutdown_ongoing(hba) && !ufshcd_eh_in_progress(hba))
 		up_read(&hba->lock);
 	return err;
 }
@@ -3832,6 +3829,9 @@ int ufshcd_map_desc_id_to_length(struct ufs_hba *hba,
 	case QUERY_DESC_IDN_RFU_1:
 		*desc_len = 0;
 		break;
+	case QUERY_DESC_IDN_RFU_2:
+		*desc_len = hba->desc_size.health_desc;
+		break;
 	default:
 		*desc_len = 0;
 		return -EINVAL;
@@ -3940,6 +3940,16 @@ static inline int ufshcd_read_power_desc(struct ufs_hba *hba,
 int ufshcd_read_device_desc(struct ufs_hba *hba, u8 *buf, u32 size)
 {
 	return ufshcd_read_desc(hba, QUERY_DESC_IDN_DEVICE, 0, buf, size);
+}
+
+int ufshcd_read_geometry_desc(struct ufs_hba *hba, u8 *buf, u32 size)
+{
+	return ufshcd_read_desc(hba, QUERY_DESC_IDN_GEOMETRY, 0, buf, size);
+}
+
+int ufshcd_read_health_desc(struct ufs_hba *hba, u8 *buf, u32 size)
+{
+	return ufshcd_read_desc(hba, QUERY_DESC_IDN_RFU_2, 0, buf, size);
 }
 
 /**
@@ -7020,10 +7030,7 @@ static int ufshcd_abort(struct scsi_cmnd *cmd)
 	 * To avoid these unnecessary/illegal step we skip to the last error
 	 * handling stage: reset and restore.
 	 */
-	if ((lrbp->lun == UFS_UPIU_UFS_DEVICE_WLUN) ||
-	    (lrbp->lun == UFS_UPIU_REPORT_LUNS_WLUN) ||
-	    (lrbp->lun == UFS_UPIU_BOOT_WLUN) ||
-	    (lrbp->lun == UFS_UPIU_RPMB_WLUN))
+	if (lrbp->lun == UFS_UPIU_UFS_DEVICE_WLUN)
 		return ufshcd_eh_host_reset_handler(cmd);
 
 	ufshcd_hold_all(hba);
@@ -7434,7 +7441,7 @@ static void ufshcd_set_active_icc_lvl(struct ufs_hba *hba)
 		dev_err(hba->dev,
 			"%s: Failed reading power descriptor.len = %d ret = %d",
 			__func__, buff_len, ret);
-		goto out;
+		return;
 	}
 
 	icc_level = ufshcd_find_max_sup_active_icc_level(hba, desc_buf,
@@ -7448,9 +7455,6 @@ static void ufshcd_set_active_icc_lvl(struct ufs_hba *hba)
 		dev_err(hba->dev,
 			"%s: Failed configuring bActiveICCLevel = %d ret = %d",
 			__func__, icc_level, ret);
-
-out:
-	kfree(desc_buf);
 }
 
 /**
@@ -7808,7 +7812,7 @@ out:
 
 static int ufs_read_device_desc_data(struct ufs_hba *hba)
 {
-	int err = 0;
+	int err;
 	u8 *desc_buf = NULL;
 
 	if (hba->desc_size.dev_desc) {
@@ -7822,7 +7826,7 @@ static int ufs_read_device_desc_data(struct ufs_hba *hba)
 	}
 	err = ufshcd_read_device_desc(hba, desc_buf, hba->desc_size.dev_desc);
 	if (err)
-		goto out;
+		return err;
 
 	/*
 	 * getting vendor (manufacturerID) and Bank Index in big endian
@@ -7834,9 +7838,8 @@ static int ufs_read_device_desc_data(struct ufs_hba *hba)
 	hba->dev_info.b_device_sub_class =
 		desc_buf[DEVICE_DESC_PARAM_DEVICE_SUB_CLASS];
 	hba->dev_info.i_product_name = desc_buf[DEVICE_DESC_PARAM_PRDCT_NAME];
-out:
-	kfree(desc_buf);
-	return err;
+
+	return 0;
 }
 
 static void ufshcd_init_desc_sizes(struct ufs_hba *hba)
@@ -7872,6 +7875,11 @@ static void ufshcd_init_desc_sizes(struct ufs_hba *hba)
 		&hba->desc_size.geom_desc);
 	if (err)
 		hba->desc_size.geom_desc = QUERY_DESC_GEOMETRY_DEF_SIZE;
+
+	err = ufshcd_read_desc_length(hba, QUERY_DESC_IDN_RFU_2, 0,
+		&hba->desc_size.health_desc);
+	if (err)
+		hba->desc_size.health_desc = QUERY_DESC_HEALTH_DEF_SIZE;
 }
 
 static void ufshcd_def_desc_sizes(struct ufs_hba *hba)
@@ -7882,6 +7890,65 @@ static void ufshcd_def_desc_sizes(struct ufs_hba *hba)
 	hba->desc_size.conf_desc = QUERY_DESC_CONFIGURATION_DEF_SIZE;
 	hba->desc_size.unit_desc = QUERY_DESC_UNIT_DEF_SIZE;
 	hba->desc_size.geom_desc = QUERY_DESC_GEOMETRY_DEF_SIZE;
+	hba->desc_size.health_desc = QUERY_DESC_HEALTH_DEF_SIZE;
+}
+
+struct ufs_health ufshcd_get_health_descriptor(struct scsi_device *sdev)
+{
+	struct ufs_hba *hba = shost_priv(sdev->host);
+	static struct ufs_health health = {0};
+	int err = 0;
+	u8 desc_buf[QUERY_DESC_HEALTH_DEF_SIZE];
+	u32 bDeviceLifeTimeEstA = 0, bDeviceLifeTimeEstB = 0;
+
+	if (!hba) {
+		return health;
+	}
+
+	pm_runtime_get_sync(hba->dev);
+	err = ufshcd_read_health_desc(hba, desc_buf,
+					QUERY_DESC_HEALTH_DEF_SIZE);
+	if (err) {
+	    pr_err("%s: ufshcd_get_health_descriptor() failed!err =%d\n", __func__, err);
+	} else {
+	    bDeviceLifeTimeEstA = desc_buf[3];
+	    bDeviceLifeTimeEstB = desc_buf[4];
+	    pr_info("%s::bDeviceLifeTimeEstA=0x%x, bDeviceLifeTimeEstB=0x%x\n", __func__, bDeviceLifeTimeEstA, bDeviceLifeTimeEstB);
+	}
+
+	health.bDeviceLifeTimeEstA = bDeviceLifeTimeEstA;
+	health.bDeviceLifeTimeEstB = bDeviceLifeTimeEstB;
+
+	pm_runtime_put_sync(hba->dev);
+
+	return health;
+}
+
+static u64 ufshcd_get_device_capacity(struct scsi_device *sdev)
+{
+	struct ufs_hba *hba = shost_priv(sdev->host);
+	int err;
+	u8 desc_buf[QUERY_DESC_GEOMETRY_DEF_SIZE];
+	u64 device_capacity_512;
+
+	if (!hba)
+		return 0;
+
+	pm_runtime_get_sync(hba->dev);
+	err = ufshcd_read_geometry_desc(hba, desc_buf,
+					QUERY_DESC_GEOMETRY_DEF_SIZE);
+	if (err) {
+	    dev_err(hba->dev, "%s: ufshcd_read_geometry_desc() failed!err =%d\n", __func__, err);
+	    device_capacity_512 = 0;
+	} else
+	    device_capacity_512 = ((u64)desc_buf[4] << 56 | (u64)desc_buf[5] <<  48 |
+				(u64)desc_buf[6] << 40 | (u64)desc_buf[7] << 32 |
+				(u64)desc_buf[8] << 24 | (u64)desc_buf[9] << 16 |
+				(u64)desc_buf[10] << 8 | (u64)desc_buf[11] << 0);
+
+	pm_runtime_put_sync(hba->dev);
+
+	return device_capacity_512;
 }
 
 /**
@@ -8295,7 +8362,7 @@ static int ufshcd_query_ioctl(struct ufs_hba *hba, u8 lun, void __user *buffer)
 		switch (ioctl_data->idn) {
 		case QUERY_ATTR_IDN_BOOT_LU_EN:
 			index = 0;
-			if (!att || att > QUERY_ATTR_IDN_BOOT_LU_EN_MAX) {
+			if (att > QUERY_ATTR_IDN_BOOT_LU_EN_MAX) {
 				dev_err(hba->dev,
 					"%s: Illegal ufs query ioctl data, opcode 0x%x, idn 0x%x, att 0x%x\n",
 					__func__, ioctl_data->opcode,
@@ -8473,6 +8540,8 @@ static struct scsi_host_template ufshcd_driver_template = {
 	.eh_host_reset_handler   = ufshcd_eh_host_reset_handler,
 	.eh_timed_out		= ufshcd_eh_timed_out,
 	.ioctl			= ufshcd_ioctl,
+	.device_capacity	= ufshcd_get_device_capacity,
+	.device_health_descriptor	= ufshcd_get_health_descriptor,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl		= ufshcd_ioctl,
 #endif
@@ -8535,11 +8604,6 @@ static int ufshcd_config_vreg(struct device *dev,
 	BUG_ON(!vreg);
 
 	if (regulator_count_voltages(reg) > 0) {
-		uA_load = on ? vreg->max_uA : 0;
-		ret = ufshcd_config_vreg_load(dev, vreg, uA_load);
-		if (ret)
-			goto out;
-
 		min_uV = on ? vreg->min_uV : 0;
 		ret = regulator_set_voltage(reg, min_uV, vreg->max_uV);
 		if (ret) {
@@ -8547,6 +8611,11 @@ static int ufshcd_config_vreg(struct device *dev,
 					__func__, name, ret);
 			goto out;
 		}
+
+		uA_load = on ? vreg->max_uA : 0;
+		ret = ufshcd_config_vreg_load(dev, vreg, uA_load);
+		if (ret)
+			goto out;
 	}
 out:
 	return ret;
@@ -10152,15 +10221,7 @@ static int ufshcd_devfreq_scale(struct ufs_hba *hba, bool scale_up)
 	 * racing during clock frequency scaling sequence.
 	 */
 	if (ufshcd_is_auto_hibern8_supported(hba)) {
-		/*
-		 * Scaling prepare acquires the rw_sem: lock
-		 * h8 may sleep in case of errors.
-		 * e.g. link_recovery. Hence, release the rw_sem
-		 * before hibern8.
-		 */
-		up_write(&hba->lock);
 		ret = ufshcd_uic_hibern8_enter(hba);
-		down_write(&hba->lock);
 		if (ret)
 			/* link will be bad state so no need to scale_up_gear */
 			return ret;
@@ -10286,8 +10347,6 @@ static ssize_t ufshcd_clkscale_enable_store(struct device *dev,
 	cancel_work_sync(&hba->clk_scaling.resume_work);
 
 	hba->clk_scaling.is_allowed = value;
-
-	flush_work(&hba->eh_work);
 
 	if (value) {
 		ufshcd_resume_clkscaling(hba);

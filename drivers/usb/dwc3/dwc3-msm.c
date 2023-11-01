@@ -121,7 +121,7 @@ MODULE_PARM_DESC(override_usb_speed, "override for USB speed");
 #define GSI_DBL_ADDR_L(n)	((QSCRATCH_REG_OFFSET + 0x110) + (n*4))
 #define GSI_DBL_ADDR_H(n)	((QSCRATCH_REG_OFFSET + 0x120) + (n*4))
 #define GSI_RING_BASE_ADDR_L(n)	((QSCRATCH_REG_OFFSET + 0x130) + (n*4))
-#define GSI_RING_BASE_ADDR_H(n)	((QSCRATCH_REG_OFFSET + 0x140) + (n*4))
+#define GSI_RING_BASE_ADDR_H(n)	((QSCRATCH_REG_OFFSET + 0x144) + (n*4))
 
 #define	GSI_IF_STS	(QSCRATCH_REG_OFFSET + 0x1A4)
 #define	GSI_WR_CTRL_STATE_MASK	BIT(15)
@@ -272,6 +272,10 @@ struct dwc3_msm {
 	struct delayed_work perf_vote_work;
 	struct delayed_work sdp_check;
 	struct mutex suspend_resume_mutex;
+
+	/* Usb online lpm test requirement, 1/5 */
+	struct class *lpm_test_class;
+	struct device *lpm_test_dev;
 };
 
 #define USB_HSPHY_3P3_VOL_MIN		3050000 /* uV */
@@ -935,7 +939,8 @@ static int gsi_startxfer_for_ep(struct usb_ep *ep)
 * @usb_ep - pointer to usb_ep instance.
 * @dbl_addr - Doorbell address obtained from IPA driver
 */
-static void gsi_store_ringbase_dbl_info(struct usb_ep *ep, u32 dbl_addr)
+static void gsi_store_ringbase_dbl_info(struct usb_ep *ep,
+        struct usb_gsi_request *request)
 {
 	struct dwc3_ep *dep = to_dwc3_ep(ep);
 	struct dwc3	*dwc = dep->dwc;
@@ -944,11 +949,27 @@ static void gsi_store_ringbase_dbl_info(struct usb_ep *ep, u32 dbl_addr)
 
 	dwc3_msm_write_reg(mdwc->base, GSI_RING_BASE_ADDR_L(n),
 			dwc3_trb_dma_offset(dep, &dep->trb_pool[0]));
-	dwc3_msm_write_reg(mdwc->base, GSI_DBL_ADDR_L(n), dbl_addr);
 
-	dev_dbg(mdwc->dev, "Ring Base Addr %d = %x", n,
+	if (request->mapped_db_reg_phs_addr_lsb)
+		dma_unmap_resource(dwc->sysdev,
+			request->mapped_db_reg_phs_addr_lsb,
+			PAGE_SIZE, DMA_BIDIRECTIONAL, 0);
+
+	request->mapped_db_reg_phs_addr_lsb = dma_map_resource(dwc->sysdev,
+			(phys_addr_t)request->db_reg_phs_addr_lsb, PAGE_SIZE,
+			DMA_BIDIRECTIONAL, 0);
+	if (dma_mapping_error(dwc->sysdev, request->mapped_db_reg_phs_addr_lsb))
+		dev_err(mdwc->dev, "mapping error for db_reg_phs_addr_lsb\n");
+
+	dev_dbg(mdwc->dev, "ep:%s dbl_addr_lsb:%x mapped_dbl_addr_lsb:%llx\n",
+		ep->name, request->db_reg_phs_addr_lsb,
+		(unsigned long long)request->mapped_db_reg_phs_addr_lsb);
+
+	dwc3_msm_write_reg(mdwc->base, GSI_DBL_ADDR_L(n),
+			(u32)request->mapped_db_reg_phs_addr_lsb);
+	dev_dbg(mdwc->dev, "Ring Base Addr %d: %x (LSB)\n", n,
 			dwc3_msm_read_reg(mdwc->base, GSI_RING_BASE_ADDR_L(n)));
-	dev_dbg(mdwc->dev, "GSI DB Addr %d = %x", n,
+	dev_dbg(mdwc->dev, "GSI DB Addr %d: %x (LSB)\n", n,
 			dwc3_msm_read_reg(mdwc->base, GSI_DBL_ADDR_L(n)));
 }
 
@@ -964,9 +985,6 @@ static void gsi_ring_db(struct usb_ep *ep, struct usb_gsi_request *request)
 	void __iomem *gsi_dbl_address_lsb;
 	void __iomem *gsi_dbl_address_msb;
 	dma_addr_t offset;
-	u64 dbl_addr = *((u64 *)request->buf_base_addr);
-	u32 dbl_lo_addr = (dbl_addr & 0xFFFFFFFF);
-	u32 dbl_hi_addr = (dbl_addr >> 32);
 	struct dwc3_ep *dep = to_dwc3_ep(ep);
 	struct dwc3	*dwc = dep->dwc;
 	struct dwc3_msm *mdwc = dev_get_drvdata(dwc->dev->parent);
@@ -974,18 +992,19 @@ static void gsi_ring_db(struct usb_ep *ep, struct usb_gsi_request *request)
 					: (request->num_bufs + 2);
 
 	gsi_dbl_address_lsb = devm_ioremap_nocache(mdwc->dev,
-					dbl_lo_addr, sizeof(u32));
+	    request->db_reg_phs_addr_lsb, sizeof(u32));
 	if (!gsi_dbl_address_lsb)
 		dev_dbg(mdwc->dev, "Failed to get GSI DBL address LSB\n");
 
 	gsi_dbl_address_msb = devm_ioremap_nocache(mdwc->dev,
-					dbl_hi_addr, sizeof(u32));
+	    request->db_reg_phs_addr_msb, sizeof(u32));
 	if (!gsi_dbl_address_msb)
 		dev_dbg(mdwc->dev, "Failed to get GSI DBL address MSB\n");
 
 	offset = dwc3_trb_dma_offset(dep, &dep->trb_pool[num_trbs-1]);
 	dev_dbg(mdwc->dev, "Writing link TRB addr: %pa to %pK (%x) for ep:%s\n",
-		&offset, gsi_dbl_address_lsb, dbl_lo_addr, ep->name);
+		&offset, gsi_dbl_address_lsb, request->db_reg_phs_addr_lsb,
+		ep->name);
 
 	writel_relaxed(offset, gsi_dbl_address_lsb);
 	writel_relaxed(0, gsi_dbl_address_msb);
@@ -1056,6 +1075,8 @@ static int gsi_prepare_trbs(struct usb_ep *ep, struct usb_gsi_request *req)
 	struct dwc3_trb *trb;
 	int num_trbs = (dep->direction) ? (2 * (req->num_bufs) + 2)
 					: (req->num_bufs + 2);
+	struct scatterlist *sg;
+	struct sg_table *sgt;
 
 	dep->trb_pool = dma_zalloc_coherent(dwc->sysdev,
 				num_trbs * sizeof(struct dwc3_trb),
@@ -1068,6 +1089,19 @@ static int gsi_prepare_trbs(struct usb_ep *ep, struct usb_gsi_request *req)
 	}
 
 	dep->num_trbs = num_trbs;
+	dma_get_sgtable(dwc->sysdev, &req->sgt_trb_xfer_ring, dep->trb_pool,
+		dep->trb_pool_dma, num_trbs * sizeof(struct dwc3_trb));
+
+	sgt = &req->sgt_trb_xfer_ring;
+	dev_dbg(dwc->dev, "%s(): trb_pool:%pK trb_pool_dma:%lx\n",
+		__func__, dep->trb_pool, (unsigned long)dep->trb_pool_dma);
+
+	for_each_sg(sgt->sgl, sg, sgt->nents, i)
+		dev_dbg(dwc->dev,
+			"%i: page_link:%lx offset:%x length:%x address:%lx\n",
+			i, sg->page_link, sg->offset, sg->length,
+			(unsigned long)sg->dma_address);
+
 	/* IN direction */
 	if (dep->direction) {
 		for (i = 0; i < num_trbs ; i++) {
@@ -1133,11 +1167,14 @@ static int gsi_prepare_trbs(struct usb_ep *ep, struct usb_gsi_request *req)
 		}
 	}
 
-	pr_debug("%s: Initialized TRB Ring for %s\n", __func__, dep->name);
+	dev_dbg(dwc->dev, "%s: Initialized TRB Ring for %s\n",
+					__func__, dep->name);
+
 	trb = &dep->trb_pool[0];
 	if (trb) {
 		for (i = 0; i < num_trbs; i++) {
-			pr_debug("TRB(%d): ADDRESS:%lx bpl:%x bph:%x size:%x ctrl:%x\n",
+				dev_dbg(dwc->dev,
+					"TRB %d: ADDR:%lx bpl:%x bph:%x sz:%x ctl:%x\n",
 				i, (unsigned long)dwc3_trb_dma_offset(dep,
 				&dep->trb_pool[i]), trb->bpl, trb->bph,
 				trb->size, trb->ctrl);
@@ -1154,7 +1191,7 @@ static int gsi_prepare_trbs(struct usb_ep *ep, struct usb_gsi_request *req)
 * @usb_ep - pointer to usb_ep instance.
 *
 */
-static void gsi_free_trbs(struct usb_ep *ep)
+static void gsi_free_trbs(struct usb_ep *ep, struct usb_gsi_request *req)
 {
 	struct dwc3_ep *dep = to_dwc3_ep(ep);
 	struct dwc3 *dwc = dep->dwc;
@@ -1171,6 +1208,7 @@ static void gsi_free_trbs(struct usb_ep *ep)
 		dep->trb_pool = NULL;
 		dep->trb_pool_dma = 0;
 	}
+	sg_free_table(&req->sgt_trb_xfer_ring);
 }
 /*
 * Configures GSI EPs. For GSI EPs we need to set interrupter numbers.
@@ -1360,7 +1398,8 @@ static int dwc3_msm_gsi_ep_op(struct usb_ep *ep,
 		break;
 	case GSI_EP_OP_FREE_TRBS:
 		dev_dbg(mdwc->dev, "EP_OP_FREE_TRBS for %s\n", ep->name);
-		gsi_free_trbs(ep);
+		request = (struct usb_gsi_request *)op_data;
+		gsi_free_trbs(ep, request);
 		break;
 	case GSI_EP_OP_CONFIG:
 		request = (struct usb_gsi_request *)op_data;
@@ -1381,7 +1420,8 @@ static int dwc3_msm_gsi_ep_op(struct usb_ep *ep,
 		break;
 	case GSI_EP_OP_STORE_DBL_INFO:
 		dev_dbg(mdwc->dev, "EP_OP_STORE_DBL_INFO\n");
-		gsi_store_ringbase_dbl_info(ep, *((u32 *)op_data));
+		request = (struct usb_gsi_request *)op_data;
+		gsi_store_ringbase_dbl_info(ep, request);
 		break;
 	case GSI_EP_OP_ENABLE_GSI:
 		dev_dbg(mdwc->dev, "EP_OP_ENABLE_GSI\n");
@@ -1577,6 +1617,9 @@ static int msm_dwc3_usbdev_notify(struct notifier_block *self,
 	struct dwc3_msm *mdwc = container_of(self, struct dwc3_msm, usbdev_nb);
 	struct dwc3 *dwc = platform_get_drvdata(mdwc->dwc3);
 	struct usb_bus *bus = priv;
+
+	dev_dbg(mdwc->dev, "%s : hc_died\n", __func__);
+	mdwc->ss_phy->flags |= USB_PHY_RESET;
 
 	/* Interested only in recovery when HC dies */
 	if (action != USB_BUS_DIED)
@@ -2231,12 +2274,6 @@ static int dwc3_msm_suspend(struct dwc3_msm *mdwc)
 
 	/* Suspend SS PHY */
 	if (dwc->maximum_speed == USB_SPEED_SUPER) {
-		if (mdwc->in_host_mode) {
-			u32 reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
-
-			reg |= DWC3_GUSB3PIPECTL_DISRXDETU3;
-			dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
-		}
 		/* indicate phy about SS mode */
 		if (dwc3_msm_is_superspeed(mdwc))
 			mdwc->ss_phy->flags |= DEVICE_IN_SS_MODE;
@@ -2421,13 +2458,6 @@ static int dwc3_msm_resume(struct dwc3_msm *mdwc)
 		usb_phy_set_suspend(mdwc->ss_phy, 0);
 		mdwc->ss_phy->flags &= ~DEVICE_IN_SS_MODE;
 		mdwc->lpm_flags &= ~MDWC3_SS_PHY_SUSPEND;
-
-		if (mdwc->in_host_mode) {
-			u32 reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
-
-			reg &= ~DWC3_GUSB3PIPECTL_DISRXDETU3;
-			dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
-		}
 	}
 
 	mdwc->hs_phy->flags &= ~(PHY_HSFS_MODE | PHY_LS_MODE);
@@ -2873,11 +2903,80 @@ static void check_for_sdp_connection(struct work_struct *w)
 	}
 }
 
+/* Usb online lpm test requirement, 2/5 */
+static bool forge_usb_offline = 0;
+
+static ssize_t set_usb_online_fn(struct device *dev,
+						struct device_attribute *attr,
+						const char *buf, size_t count)
+{
+	int online;
+	struct dwc3_msm *mdwc = dev_get_drvdata(dev);
+
+	if (kstrtoint(buf, 10, &online) < 0)
+		return -EINVAL;
+
+	online = !!online;
+	pr_info("%s, online : %d\n", __func__, online);
+
+	mdwc->vbus_active = online;
+	dwc3_ext_event_notify(mdwc);
+
+	forge_usb_offline = !online;
+
+	return count;
+}
+
+static DEVICE_ATTR(set_usb_online, S_IWUSR, NULL, set_usb_online_fn);
+
+static struct device_attribute *lpm_test_attributes[] = {
+	&dev_attr_set_usb_online,
+	NULL
+};
+
+static int lpm_test_create_device(struct dwc3_msm *motg)
+{
+	struct device_attribute **attrs = lpm_test_attributes;
+	struct device_attribute *attr;
+	struct dwc3 *dwc = platform_get_drvdata(motg->dwc3);
+	int err;
+
+	if (dwc->core_id == 0)
+		pr_info("%s\n", __func__);
+	else
+		return 0;
+
+	motg->lpm_test_class = class_create(THIS_MODULE, "charger");
+	if (IS_ERR(motg->lpm_test_class))
+		return PTR_ERR(motg->lpm_test_class);
+
+	motg->lpm_test_dev = device_create(motg->lpm_test_class, NULL, 0, NULL, "test");
+	if (IS_ERR(motg->lpm_test_dev))
+		return PTR_ERR(motg->lpm_test_dev);
+
+	dev_set_drvdata(motg->lpm_test_dev, motg);
+
+	while ((attr = *attrs++)) {
+		err = device_create_file(motg->lpm_test_dev, attr);
+		if (err) {
+			device_destroy(motg->lpm_test_class, 0);
+			return err;
+		}
+	}
+	return 0;
+}
+
+
+
 static int dwc3_msm_vbus_notifier(struct notifier_block *nb,
 	unsigned long event, void *ptr)
 {
 	struct dwc3_msm *mdwc = container_of(nb, struct dwc3_msm, vbus_nb);
 	struct dwc3 *dwc = platform_get_drvdata(mdwc->dwc3);
+
+	/* Usb online lpm test requirement, 3/5 */
+	if (forge_usb_offline)
+		forge_usb_offline = 0;
 
 	dev_dbg(mdwc->dev, "vbus:%ld event received\n", event);
 
@@ -3503,6 +3602,12 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 		dwc3_ext_event_notify(mdwc);
 	}
 
+	/* Usb online lpm test requirement, 4/5 */
+	ret = lpm_test_create_device(mdwc);
+	if (ret) {
+		dev_err(&pdev->dev, "fail to setup lpm_test_device\n");
+	}
+
 	return 0;
 
 put_psy:
@@ -3814,6 +3919,7 @@ static int dwc3_otg_start_host(struct dwc3_msm *mdwc, int on)
 			atomic_read(&mdwc->dev->power.usage_count));
 		pm_runtime_mark_last_busy(mdwc->dev);
 		pm_runtime_put_sync_autosuspend(mdwc->dev);
+		mdwc->ss_phy->flags &= ~USB_PHY_RESET;
 #ifdef CONFIG_SMP
 		mdwc->pm_qos_req_dma.type = PM_QOS_REQ_AFFINE_IRQ;
 		mdwc->pm_qos_req_dma.irq = dwc->irq;
@@ -3883,6 +3989,21 @@ static void dwc3_override_vbus_status(struct dwc3_msm *mdwc, bool vbus_present)
 	}
 }
 
+static void dwc3_uevent(struct dwc3_msm *mdwc, int state)
+{
+	char *online[2] = { "USB_STATE=ONLINE", NULL };
+	char *offline[2] = { "USB_STATE=OFFLINE", NULL };
+	char **uevent_envp = NULL;
+
+	uevent_envp = state ? online : offline;
+
+	if (uevent_envp) {
+		kobject_uevent_env(&mdwc->lpm_test_dev->kobj, KOBJ_CHANGE, uevent_envp);
+		pr_info("%s: sent uevent %s\n", __func__, uevent_envp[0]);
+	}
+}
+
+
 /**
  * dwc3_otg_start_peripheral -  bind/unbind the peripheral controller.
  *
@@ -3940,6 +4061,9 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		dwc3_override_vbus_status(mdwc, false);
 		dwc3_usb3_phy_suspend(dwc, false);
 	}
+
+	/* notify usb's state to userspace */
+	dwc3_uevent(mdwc, on);
 
 	pm_runtime_put_sync(mdwc->dev);
 	dbg_event(0xFF, "StopGdgt psync",
@@ -4005,6 +4129,10 @@ static int get_psy_type(struct dwc3_msm *mdwc)
 	if (mdwc->charging_disabled)
 		return -EINVAL;
 
+	/* Usb online lpm test requirement, 5/5 */
+	if (forge_usb_offline)
+		return 0;
+
 	if (!mdwc->usb_psy) {
 		mdwc->usb_psy = power_supply_get_by_name("usb");
 		if (!mdwc->usb_psy) {
@@ -4030,7 +4158,7 @@ static int dwc3_msm_gadget_vbus_draw(struct dwc3_msm *mdwc, unsigned int mA)
 			pval.intval = -ETIMEDOUT;
 		else
 			pval.intval = 1000 * mA;
-		goto set_prop;
+		/* goto set_prop; */  /*type float's current is set by charging */
 	}
 
 	if (mdwc->max_power == mA || psy_type != POWER_SUPPLY_TYPE_USB)
@@ -4040,7 +4168,7 @@ static int dwc3_msm_gadget_vbus_draw(struct dwc3_msm *mdwc, unsigned int mA)
 	/* Set max current limit in uA */
 	pval.intval = 1000 * mA;
 
-set_prop:
+/*set_prop: */  /*type float's current is set by charging */
 	ret = power_supply_set_property(mdwc->usb_psy,
 				POWER_SUPPLY_PROP_SDP_CURRENT_MAX, &pval);
 	if (ret) {
@@ -4076,6 +4204,9 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 		dev_err(mdwc->dev, "dwc is NULL.\n");
 		return;
 	}
+
+	dev_info(mdwc->dev, "dwc3 otg_state = %d, inputs = %lx\n",
+		mdwc->otg_state, mdwc->inputs);
 
 	state = usb_otg_state_string(mdwc->otg_state);
 	dev_dbg(mdwc->dev, "%s state\n", state);

@@ -30,6 +30,9 @@
 #include "dsi-panel-nt36850-truly-dualmipi-wqhd-cmd.dtsi"
 #include "dsi-panel-test-dualmipi-oled-cmd.dtsi"
 #include <dt-bindings/clock/mdss-10nm-pll-clk.h>
+#include "dsi-panel-zte-samsung-1080p-cmd.dtsi"
+#include "dsi-panel-zte-kingdisplay-rm69299-amoled-fhd-plus-cmd.dtsi"
+#include "dsi-panel-zte-samsung-1080p-video-nolcd.dtsi"
 
 &soc {
 	dsi_panel_pwr_supply: dsi_panel_pwr_supply {
@@ -105,6 +108,74 @@
 			qcom,supply-post-on-sleep = <0>;
 		};
 	};
+/*modify by yujianhua for p845a01 start*/
+	dsi_samsung_1080P_cmd_display: qcom,dsi-display@18{
+		compatible = "qcom,dsi-display";
+		label = "dsi_samsung_1080P_cmd_display";
+		qcom,display-type = "primary";
+
+		qcom,dsi-ctrl = <&mdss_dsi0>;
+		qcom,dsi-phy = <&mdss_dsi_phy0>;
+		clocks = <&mdss_dsi0_pll BYTECLK_MUX_0_CLK>,
+		       <&mdss_dsi0_pll PCLK_MUX_0_CLK>,
+		       <&pm8998_div_clk3 0>;
+		clock-names = "src_byte_clk", "src_pixel_clk", "div_clk3";
+
+		pinctrl-names = "panel_active", "panel_suspend";
+		pinctrl-0 = <&sde_dsi_active &sde_te_active &iris2p_clk_default>;
+		pinctrl-1 = <&sde_dsi_suspend &sde_te_suspend>;
+
+		qcom,dsi-panel = <&dsi_samsung_1080p_cmd>;
+		vddio-supply = <&pm8998_l14>;
+		lab-supply = <&lab_regulator>;
+		ibb-supply = <&ibb_regulator>;
+	};
+
+	dsi_rm69299_amoled_fhd_cmd_display: qcom,dsi-display@19{
+		compatible = "qcom,dsi-display";
+		label = "dsi_rm69299_amoled_fhd_cmd_display";
+		qcom,display-type = "primary";
+
+		qcom,dsi-ctrl = <&mdss_dsi0>;
+		qcom,dsi-phy = <&mdss_dsi_phy0>;
+		clocks = <&mdss_dsi0_pll BYTECLK_MUX_0_CLK>,
+		       <&mdss_dsi0_pll PCLK_MUX_0_CLK>,
+		       <&pm8998_div_clk3 0>;
+		clock-names = "src_byte_clk", "src_pixel_clk", "div_clk3";
+
+		pinctrl-names = "panel_active", "panel_suspend";
+		pinctrl-0 = <&sde_dsi_active &sde_te_active &iris2p_clk_default>;
+		pinctrl-1 = <&sde_dsi_suspend &sde_te_suspend>;
+
+		qcom,dsi-panel = <&dsi_rm69299_amoled_fhd_cmd>;
+		vddio-supply = <&pm8998_l14>;
+		lab-supply = <&lab_regulator>;
+		ibb-supply = <&ibb_regulator>;
+	};
+
+	dsi_samsung_1080P_video_nolcd_display: qcom,dsi-display@20{
+		compatible = "qcom,dsi-display";
+		label = "dsi_samsung_1080P_video_nolcd_display";
+		qcom,display-type = "primary";
+
+		qcom,dsi-ctrl = <&mdss_dsi0>;
+		qcom,dsi-phy = <&mdss_dsi_phy0>;
+		clocks = <&mdss_dsi0_pll BYTECLK_MUX_0_CLK>,
+		       <&mdss_dsi0_pll PCLK_MUX_0_CLK>,
+		       <&pm8998_div_clk3 0>;
+		clock-names = "src_byte_clk", "src_pixel_clk", "div_clk3";
+
+		pinctrl-names = "panel_active", "panel_suspend";
+		pinctrl-0 = <&sde_dsi_active &sde_te_active &iris2p_clk_default>;
+		pinctrl-1 = <&sde_dsi_suspend &sde_te_suspend>;
+
+		qcom,dsi-panel = <&dsi_samsung_1080p_video_nolcd>;
+		vddio-supply = <&pm8998_l14>;
+		lab-supply = <&lab_regulator>;
+		ibb-supply = <&ibb_regulator>;
+	};
+
+/*modify by yujianhua for p845a01 end*/
 
 	dsi_sharp_4k_dsc_video_display: qcom,dsi-display@0 {
 		compatible = "qcom,dsi-display";
@@ -476,7 +547,7 @@
 		lab-supply = <&lab_regulator>;
 		ibb-supply = <&ibb_regulator>;
 	};
-
+	
 	dsi_dual_test_cmd_display: qcom,dsi-display@17 {
 		compatible = "qcom,dsi-display";
 		label = "dsi_dual_test_cmd";
@@ -843,3 +914,43 @@
 		};
 	};
 };
+
+&dsi_rm69299_amoled_fhd_cmd {
+	qcom,mdss-dsi-t-clk-post = <0x0e>;
+	qcom,mdss-dsi-t-clk-pre = <0x35>;
+	qcom,mdss-dsi-display-timings {
+		 timing@0 {
+			qcom,mdss-dsi-panel-phy-timings = [00 22 09 09 25 24 09
+				09 06 03 04 00];
+			qcom,display-topology = <1 0 1>;
+			qcom,default-topology-index = <0>;
+		};
+	};
+};
+
+&dsi_samsung_1080p_cmd {
+	qcom,mdss-dsi-t-clk-post = <0x0e>;
+	qcom,mdss-dsi-t-clk-pre = <0x34>;
+	qcom,mdss-dsi-display-timings {
+		 timing@0 {
+			qcom,mdss-dsi-panel-phy-timings = [00 22 08 09 25 23 09
+				09 06 03 04 00];
+			qcom,display-topology = <1 0 1>;
+			qcom,default-topology-index = <0>;
+		};
+	};
+};
+
+&dsi_samsung_1080p_video_nolcd {
+	qcom,mdss-dsi-t-clk-post = <0x0e>;
+	qcom,mdss-dsi-t-clk-pre = <0x34>;
+	qcom,mdss-dsi-display-timings {
+		 timing@0 {
+			qcom,mdss-dsi-panel-phy-timings = [00 22 08 09 25 23 09
+				09 06 03 04 00];
+			qcom,display-topology = <1 0 1>;
+			qcom,default-topology-index = <0>;
+		};
+	};
+};
+

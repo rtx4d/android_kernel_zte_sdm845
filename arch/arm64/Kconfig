@@ -73,8 +73,6 @@ config ARM64
 	select HAVE_CMPXCHG_DOUBLE
 	select HAVE_CMPXCHG_LOCAL
 	select HAVE_CONTEXT_TRACKING
-	select HAVE_DEBUG_BUGVERBOSE
-	select HAVE_DEBUG_KMEMLEAK
 	select HAVE_DMA_API_DEBUG
 	select HAVE_DMA_CONTIGUOUS
 	select HAVE_DYNAMIC_FTRACE
@@ -84,7 +82,6 @@ config ARM64
 	select HAVE_FUNCTION_GRAPH_TRACER
 	select HAVE_GCC_PLUGINS
 	select HAVE_GENERIC_DMA_COHERENT
-	select HAVE_HW_BREAKPOINT if PERF_EVENTS
 	select HAVE_IRQ_TIME_ACCOUNTING
 	select HAVE_MEMBLOCK
 	select HAVE_MEMBLOCK_NODE_MAP if NUMA
@@ -111,7 +108,6 @@ config ARM64
 	select SPARSE_IRQ
 	select SYSCTL_EXCEPTION_TRACE
 	select THREAD_INFO_IN_TASK
-	select ARCH_SUPPORTS_SPECULATIVE_PAGE_FAULT
 	help
 	  ARM 64-bit (AArch64) Linux support.
 
@@ -274,6 +270,18 @@ source "drivers/pci/Kconfig"
 endmenu
 
 menu "Kernel Features"
+
+#
+# Added for ZTE board configuration by ZTE_BOOT
+#
+menu "ZTE Board Selection"
+config BOARD_AKERSHUS
+	depends on ARCH_SDM845
+	bool "ZTE AKERSHUS"
+	help
+	  Support for ZTE SDM845 Akershus device.
+
+endmenu
 
 menu "ARM errata workarounds via the alternatives framework"
 

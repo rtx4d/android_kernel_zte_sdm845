@@ -72,12 +72,42 @@
 
 /* PERIPH_SS_PHY_REFGEN_NORTH_BG_CTRL register bits */
 #define BANDGAP_BYPASS			BIT(0)
+/* Modify register for eye diagram 1/5 start*/
+#define QUSB2PHY_PORT_TUNE1 0x240
+#define QUSB2PHY_PORT_TUNE2 0x244
+#define QUSB2PHY_PORT_TUNE3 0x248
+#define QUSB2PHY_PORT_TUNE4 0x24c
+#define QUSB2PHY_PORT_TUNE5 0x250
+#define QUSB2PHY_PORT_BIAS1 0x194
+#define QUSB2PHY_PORT_BIAS2 0x198
 
-/* DEBUG_CTRL2 register value to program VSTATUS MUX for PHY status */
-#define DEBUG_CTRL2_MUX_PLL_LOCK_STATUS	0x4
+unsigned int phy_tune1;
+module_param(phy_tune1, uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(phy_tune1, "QUSB PHY v2 TUNE1");
+unsigned int phy_tune2;
+module_param(phy_tune2, uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(phy_tune2, "QUSB PHY v2 TUNE2");
+unsigned int phy_tune3;
+module_param(phy_tune3, uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(phy_tune3, "QUSB PHY v2 TUNE3");
+unsigned int phy_tune4;
+module_param(phy_tune4, uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(phy_tune4, "QUSB PHY v2 TUNE4");
+unsigned int phy_tune5;
+module_param(phy_tune5, uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(phy_tune5, "QUSB PHY v2 TUNE5");
+unsigned int phy_bias1;
+module_param(phy_bias1, uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(phy_bias1, "QUSB PHY v2 BIAS1");
+unsigned int phy_bias2;
+module_param(phy_bias2, uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(phy_bias2, "QUSB PHY v2 BIAS2");
 
-/* STAT5 register bits */
-#define VSTATUS_PLL_LOCK_STATUS_MASK	BIT(0)
+#undef pr_debug
+#undef dev_dbg
+#define pr_debug pr_err
+#define dev_dbg dev_err
+/* Modify register for eye diagram 1/5 end*/
 
 enum qusb_phy_reg {
 	PORT_TUNE1,
@@ -89,8 +119,6 @@ enum qusb_phy_reg {
 	BIAS_CTRL_2,
 	SQ_CTRL1,
 	SQ_CTRL2,
-	DEBUG_CTRL2,
-	STAT5,
 	USB2_PHY_REG_MAX,
 };
 
@@ -369,6 +397,10 @@ static void qusb_phy_get_tune1_param(struct qusb_phy *qphy)
 	qphy->tune_val = TUNE_VAL_MASK(qphy->tune_val,
 				qphy->efuse_bit_pos, bit_mask);
 	reg = readb_relaxed(qphy->base + qphy->phy_reg[PORT_TUNE1]);
+	/* Modify register for eye diagram 2/5 start*/
+	pr_debug("%s(): tune1 value:0x%x before change\n",
+							__func__, reg);
+	/* Modify register for eye diagram 2/5 end*/
 	if (qphy->tune_val) {
 		reg = reg & 0x0f;
 		reg |= (qphy->tune_val << 4);
@@ -405,18 +437,6 @@ static void qusb_phy_reset(struct qusb_phy *qphy)
 	if (ret)
 		dev_err(qphy->phy.dev, "%s: phy_reset deassert failed\n",
 							__func__);
-}
-
-static bool qusb_phy_pll_locked(struct qusb_phy *qphy)
-{
-	u32 val;
-
-	writel_relaxed(DEBUG_CTRL2_MUX_PLL_LOCK_STATUS,
-		       qphy->base + qphy->phy_reg[DEBUG_CTRL2]);
-
-	val = readl_relaxed(qphy->base + qphy->phy_reg[STAT5]);
-
-	return (val & VSTATUS_PLL_LOCK_STATUS_MASK);
 }
 
 static void qusb_phy_host_init(struct usb_phy *phy)
@@ -498,8 +518,8 @@ static int qusb_phy_init(struct usb_phy *phy)
 		qusb_phy_write_seq(qphy->base, qphy->qusb_phy_init_seq,
 				qphy->init_seq_len, 0);
 	if (qphy->efuse_reg) {
-		if (!qphy->tune_val)
-			qusb_phy_get_tune1_param(qphy);
+		/*if (!qphy->tune_val)   */ /* Modify register for eye diagram 3/5*/
+		qusb_phy_get_tune1_param(qphy);
 
 		pr_debug("%s(): Programming TUNE1 parameter as:%x\n", __func__,
 				qphy->tune_val);
@@ -510,15 +530,78 @@ static int qusb_phy_init(struct usb_phy *phy)
 	/* if debugfs based tunex params are set, use that value. */
 	for (p_index = 0; p_index < 5; p_index++) {
 		if (qphy->tune[p_index])
+		/* Modify register for eye diagram 4/5 start*/
+		{
+			pr_debug("%s(): Programming TUNE%d parameter as:%x\n", __func__, p_index+1,
+				qphy->tune_val);
 			writel_relaxed(qphy->tune[p_index],
 				qphy->base + qphy->phy_reg[PORT_TUNE1] +
 							(4 * p_index));
+		}
+		/* Modify register for eye diagram 4/5 end*/
 	}
 
 	if (qphy->refgen_north_bg_reg)
-		if (readl_relaxed(qphy->refgen_north_bg_reg) & BANDGAP_BYPASS)
+	/* Modify register for eye diagram 5/5 start*/
+		if (readl_relaxed(qphy->refgen_north_bg_reg) & BANDGAP_BYPASS) {
+			pr_debug("%s(): overwrite bias2\n", __func__);
 			writel_relaxed(BIAS_CTRL_2_OVERRIDE_VAL,
 				qphy->base + qphy->phy_reg[BIAS_CTRL_2]);
+		}
+
+	/*add for dynamic change tune settings*/
+	/* If phy_tune1 modparam set, override tune1 value */
+	if (phy_tune1) {
+		pr_err("%s(): (modparam) TUNE1 val:0x%02x\n",
+			__func__, phy_tune1);
+		writel_relaxed(phy_tune1,
+			qphy->base + qphy->phy_reg[PORT_TUNE1]);
+	}
+	/* If phy_tune2 modparam set, override tune2 value */
+	if (phy_tune2) {
+		pr_err("%s(): (modparam) TUNE2 val:0x%02x\n",
+			__func__, phy_tune2);
+		writel_relaxed(phy_tune2,
+			qphy->base + qphy->phy_reg[PORT_TUNE1]+4);
+	}
+	/* If phy_tune3 modparam set, override tune3 value */
+	if (phy_tune3) {
+		pr_err("%s(): (modparam) TUNE3 val:0x%02x\n",
+			__func__, phy_tune3);
+		writel_relaxed(phy_tune3,
+			qphy->base + qphy->phy_reg[PORT_TUNE1]+8);
+	}
+	/* If phy_tune4 modparam set, override tune4 value */
+	if (phy_tune4) {
+		pr_err("%s(): (modparam) TUNE4 val:0x%02x\n",
+			__func__, phy_tune4);
+		writel_relaxed(phy_tune4,
+			qphy->base + qphy->phy_reg[PORT_TUNE1]+0xc);
+	}
+	/* If phy_tune5 modparam set, override tune4 value */
+	if (phy_tune5) {
+		pr_err("%s(): (modparam) TUNE5 val:0x%02x\n",
+			__func__, phy_tune5);
+		writel_relaxed(phy_tune5,
+			qphy->base + qphy->phy_reg[PORT_TUNE1]+0x10);
+	}
+
+	/* If phy_BIAS1 modparam set, override bias1 value */
+
+	if (phy_bias1) {
+		pr_err("%s(): (modparam) bias1 val:0x%02x\n",
+			__func__, phy_bias1);
+		writel_relaxed(phy_bias1,
+			qphy->base + qphy->phy_reg[BIAS_CTRL_2]-4);
+	}
+
+	if (phy_bias2) {
+		pr_err("%s(): (modparam) bias2 val:0x%02x\n",
+			__func__, phy_bias2);
+		writel_relaxed(phy_bias2,
+			qphy->base + qphy->phy_reg[BIAS_CTRL_2]);
+	}
+	/* Modify register for eye diagram 5/5 end*/
 
 	/* ensure above writes are completed before re-enabling PHY */
 	wmb();
@@ -647,12 +730,18 @@ static int qusb_phy_set_suspend(struct usb_phy *phy, int suspend)
 			writel_relaxed(intr_mask,
 				qphy->base + qphy->phy_reg[INTR_CTRL]);
 
+			/* hold core PLL into reset */
+			writel_relaxed(CORE_PLL_EN_FROM_RESET |
+				CORE_RESET | CORE_RESET_MUX,
+				qphy->base +
+				qphy->phy_reg[PLL_CORE_INPUT_OVERRIDE]);
+
 			if (linestate & (LINESTATE_DP | LINESTATE_DM)) {
 				/* enable phy auto-resume */
 				writel_relaxed(0x91,
 					qphy->base + qphy->phy_reg[TEST1]);
-				/* Delay recommended between TEST1 writes */
-				usleep_range(10, 20);
+				/* flush the previous write before next write */
+				wmb();
 				writel_relaxed(0x90,
 					qphy->base + qphy->phy_reg[TEST1]);
 			}
@@ -681,26 +770,12 @@ static int qusb_phy_set_suspend(struct usb_phy *phy, int suspend)
 			writel_relaxed(0x00,
 				qphy->base + qphy->phy_reg[INTR_CTRL]);
 
-			/* Reset PLL if needed */
-			if (!qusb_phy_pll_locked(qphy)) {
-				dev_dbg(phy->dev, "%s: reset PLL\n", __func__);
-				/* hold core PLL into reset */
-				writel_relaxed(CORE_PLL_EN_FROM_RESET |
-					CORE_RESET | CORE_RESET_MUX,
-					qphy->base +
-					qphy->phy_reg[PLL_CORE_INPUT_OVERRIDE]);
+			/* bring core PLL out of reset */
+			writel_relaxed(CORE_PLL_EN_FROM_RESET, qphy->base +
+				qphy->phy_reg[PLL_CORE_INPUT_OVERRIDE]);
 
-				/* Wait for PLL to get reset */
-				usleep_range(10, 20);
-
-				/* bring core PLL out of reset */
-				writel_relaxed(CORE_PLL_EN_FROM_RESET,
-					qphy->base +
-					qphy->phy_reg[PLL_CORE_INPUT_OVERRIDE]);
-
-				/* Makes sure that above write goes through */
-				wmb();
-			}
+			/* Makes sure that above write goes through */
+			wmb();
 		} else { /* Cable connect case */
 			qusb_phy_enable_clocks(qphy, true);
 		}

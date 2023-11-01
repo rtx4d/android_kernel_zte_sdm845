@@ -38,7 +38,6 @@
 			#size-cells = <1>;
 			interrupt-parent = <&smb1355_0>;
 			status = "disabled";
-
 			io-channels = <&pmi8998_rradc 2>,
 				      <&pmi8998_rradc 12>;
 			io-channel-names = "charger_temp",
@@ -85,7 +84,6 @@
 			#size-cells = <1>;
 			interrupt-parent = <&smb1355_1>;
 			status = "disabled";
-
 			io-channels = <&pmi8998_rradc 2>,
 				      <&pmi8998_rradc 12>;
 			io-channel-names = "charger_temp",

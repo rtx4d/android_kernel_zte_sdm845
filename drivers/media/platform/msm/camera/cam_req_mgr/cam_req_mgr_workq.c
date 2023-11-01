@@ -178,10 +178,9 @@ end:
 }
 
 int cam_req_mgr_workq_create(char *name, int32_t num_tasks,
-	struct cam_req_mgr_core_workq **workq, enum crm_workq_context in_irq,
-	int flags)
+	struct cam_req_mgr_core_workq **workq, enum crm_workq_context in_irq)
 {
-	int32_t i, wq_flags = 0, max_active_tasks = 0;
+	int32_t i;
 	struct crm_workq_task  *task;
 	struct cam_req_mgr_core_workq *crm_workq = NULL;
 	char buf[128] = "crm_workq-";
@@ -193,17 +192,10 @@ int cam_req_mgr_workq_create(char *name, int32_t num_tasks,
 		if (crm_workq == NULL)
 			return -ENOMEM;
 
-		wq_flags |= WQ_UNBOUND;
-		if (flags & CAM_WORKQ_FLAG_HIGH_PRIORITY)
-			wq_flags |= WQ_HIGHPRI;
-
-		if (flags & CAM_WORKQ_FLAG_SERIAL)
-			max_active_tasks = 1;
-
 		strlcat(buf, name, sizeof(buf));
 		CAM_DBG(CAM_CRM, "create workque crm_workq-%s", name);
 		crm_workq->job = alloc_workqueue(buf,
-			wq_flags, max_active_tasks, NULL);
+			WQ_HIGHPRI | WQ_UNBOUND, 0, NULL);
 		if (!crm_workq->job) {
 			kfree(crm_workq);
 			return -ENOMEM;
@@ -228,7 +220,7 @@ int cam_req_mgr_workq_create(char *name, int32_t num_tasks,
 				crm_workq->task.num_task,
 				GFP_KERNEL);
 		if (!crm_workq->task.pool) {
-			CAM_WARN(CAM_CRM, "Insufficient memory %zu",
+			CAM_WARN(CAM_CRM, "Insufficient memory %lu",
 				sizeof(struct crm_workq_task) *
 				crm_workq->task.num_task);
 			kfree(crm_workq);

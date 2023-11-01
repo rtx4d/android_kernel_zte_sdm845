@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -3088,11 +3088,7 @@ static int msm_comm_session_init(int flipped_state,
 		return -EINVAL;
 	}
 
-	rc = msm_comm_init_clocks_and_bus_data(inst);
-	if (rc) {
-		dprintk(VIDC_ERR, "Failed to initialize clocks and bus data\n");
-		goto exit;
-	}
+	msm_comm_init_clocks_and_bus_data(inst);
 
 	dprintk(VIDC_DBG, "%s: inst %pK\n", __func__, inst);
 	rc = call_hfi_op(hdev, session_init, hdev->hfi_device_data,
@@ -3833,7 +3829,7 @@ int msm_vidc_send_pending_eos_buffers(struct msm_vidc_inst *inst)
 		data.filled_len = 0;
 		data.offset = 0;
 		data.flags = HAL_BUFFERFLAG_EOS;
-		data.timestamp = 0;
+		data.timestamp = LLONG_MAX;
 		data.extradata_addr = data.device_addr;
 		data.extradata_size = 0;
 		dprintk(VIDC_DBG, "Queueing EOS buffer 0x%x\n",
@@ -5101,14 +5097,6 @@ int msm_comm_flush(struct msm_vidc_inst *inst, u32 flags)
 				"Invalid params, inst %pK\n", inst);
 		return -EINVAL;
 	}
-
-	if (inst->state < MSM_VIDC_OPEN_DONE) {
-		dprintk(VIDC_ERR,
-			"Invalid state to call flush, inst %pK, state %#x\n",
-			inst, inst->state);
-		return -EINVAL;
-	}
-
 	core = inst->core;
 	hdev = core->device;
 
@@ -6601,7 +6589,6 @@ void handle_release_buffer_reference(struct msm_vidc_inst *inst,
 	struct msm_vidc_buffer *temp;
 	bool found = false;
 	int i = 0;
-	u32 planes[VIDEO_MAX_PLANES] = {0};
 
 	mutex_lock(&inst->flush_lock);
 	mutex_lock(&inst->registeredbufs.lock);
@@ -6615,10 +6602,6 @@ void handle_release_buffer_reference(struct msm_vidc_inst *inst,
 		}
 	}
 	if (found) {
-		/* save device_addr */
-		for (i = 0; i < mbuf->vvb.vb2_buf.num_planes; i++)
-			planes[i] = mbuf->smem[i].device_addr;
-
 		/* send RBR event to client */
 		msm_vidc_queue_rbr_event(inst,
 			mbuf->vvb.vb2_buf.planes[0].m.fd,
@@ -6636,7 +6619,6 @@ void handle_release_buffer_reference(struct msm_vidc_inst *inst,
 		if (!mbuf->smem[0].refcount) {
 			list_del(&mbuf->list);
 			kref_put_mbuf(mbuf);
-			mbuf = NULL;
 		}
 	} else {
 		print_vidc_buffer(VIDC_ERR, "mbuf not found", inst, mbuf);
@@ -6654,8 +6636,8 @@ void handle_release_buffer_reference(struct msm_vidc_inst *inst,
 	 */
 	found = false;
 	list_for_each_entry(temp, &inst->registeredbufs.list, list) {
-		if (msm_comm_compare_device_plane(temp, planes, 0)) {
-			mbuf = temp;
+		if (msm_comm_compare_vb2_plane(inst, mbuf,
+				&temp->vvb.vb2_buf, 0)) {
 			found = true;
 			break;
 		}
@@ -6675,11 +6657,9 @@ void handle_release_buffer_reference(struct msm_vidc_inst *inst,
 		/* don't queue the buffer */
 		found = false;
 	}
-	/* clear required flags as the buffer is going to be queued */
-	if (found) {
+	/* clear DEFERRED flag, if any, as the buffer is going to be queued */
+	if (found)
 		mbuf->flags &= ~MSM_VIDC_FLAG_DEFERRED;
-		mbuf->flags &= ~MSM_VIDC_FLAG_RBR_PENDING;
-	}
 
 unlock:
 	mutex_unlock(&inst->registeredbufs.lock);

@@ -878,6 +878,7 @@ static bool is_debug_batt_id(struct fg_chip *chip)
 static int fg_get_prop_capacity(struct fg_chip *chip, int *val)
 {
 	int rc, msoc;
+	int batt_temp, vbatt_uv;
 
 	if (is_debug_batt_id(chip)) {
 		*val = DEBUG_BATT_SOC;
@@ -912,6 +913,25 @@ static int fg_get_prop_capacity(struct fg_chip *chip, int *val)
 		*val = chip->maint_soc;
 	else
 		*val = msoc;
+
+	if (*val == 0) {
+		rc = fg_get_battery_temp(chip, &batt_temp);
+		if (rc < 0) {
+			pr_err("Error in getting batt_temp\n");
+			return 0;
+		}
+		rc = fg_get_battery_voltage(chip, &vbatt_uv);
+		if (rc < 0) {
+			pr_err("Error in getting vbatt_uv\n");
+			return 0;
+		}
+		if (batt_temp >= 150 && vbatt_uv >= (chip->dt.cutoff_volt_mv * 1000)) {
+			pr_info("change soc from 0 to 1, temp:%d, vbat:%d\n",
+				batt_temp, vbatt_uv);
+			*val = 1;
+		}
+	}
+
 	return 0;
 }
 
@@ -995,6 +1015,11 @@ static int fg_get_batt_profile(struct fg_chip *chip)
 
 	profile_node = of_batterydata_get_best_profile(batt_node,
 				chip->batt_id_ohms / 1000, NULL);
+	if (profile_node == NULL) {
+		pr_err("profile_node is null, get one more.\n");
+		profile_node = of_batterydata_get_best_profile(batt_node,
+				chip->batt_id_ohms / 1000, NULL);
+	}
 	if (IS_ERR(profile_node))
 		return PTR_ERR(profile_node);
 
@@ -1029,6 +1054,13 @@ static int fg_get_batt_profile(struct fg_chip *chip)
 	if (rc < 0) {
 		pr_err("battery cc_cv threshold unavailable, rc:%d\n", rc);
 		chip->bp.vbatt_full_mv = -EINVAL;
+	}
+
+	rc = of_property_read_u32(profile_node, "qcom,nom-batt-capacity-uah",
+			&chip->bp.nom_batt_capacity_uah);
+	if (rc < 0) {
+		pr_err("battery capacity uah unavailable, rc:%d\n", rc);
+		chip->bp.nom_batt_capacity_uah = -EINVAL;
 	}
 
 	data = of_get_property(profile_node, "qcom,fg-profile-data", &len);
@@ -1137,6 +1169,52 @@ static int fg_set_esr_timer(struct fg_chip *chip, int cycles_init,
 }
 
 /* Other functions HERE */
+static int fg_set_constant_chg_voltage(struct fg_chip *chip, int volt_uv);
+#define DELTA_OF_CCCV_2_VF_MV 10
+#define PERCENT(X, Y)  (100 * X / Y)
+#define FACTOR_OF_MV_2_UV 1000
+#define UPDATE_FV_MV(X, Y) (X - (Y * FACTOR_OF_MV_2_UV))
+#define UPDATE_FCC_MA(X, Y) ((X / FACTOR_OF_MV_2_UV) * Y / 100)
+static void fg_adjust_aged_battery_fv_fcc(struct fg_chip *chip)
+{
+	int fcc = 0;
+	int cl = 0;
+	int fv = 0;
+	int pct = 0;
+	int aged_level = 0;
+
+	pr_info("fg_cap_learning, nom:%duAh, learned:%llduAh\n",
+		chip->bp.nom_batt_capacity_uah, chip->cl.learned_cc_uah);
+
+	if (chip->cl.learned_cc_uah <= 0 || chip->bp.nom_batt_capacity_uah <= 0
+		|| chip->bp.float_volt_uv <= 0) {
+		return;
+	}
+
+	cl = chip->cl.learned_cc_uah;
+	fv = chip->bp.float_volt_uv;
+	pct = PERCENT(cl, chip->bp.nom_batt_capacity_uah);
+
+	for (aged_level = SEVERE; aged_level >= INTACT ; aged_level--) {
+		if (pct <= aged_battery_paras_table[aged_level].level) {
+			break;
+		}
+	}
+	fv = UPDATE_FV_MV(fv, aged_battery_paras_table[aged_level].fv_minus);
+	fcc = UPDATE_FCC_MA(cl, aged_battery_paras_table[aged_level].fcc_pct);
+
+	chip->bp.float_volt_uv = fv;
+	chip->bp.vbatt_full_mv = (chip->bp.float_volt_uv / FACTOR_OF_MV_2_UV) - DELTA_OF_CCCV_2_VF_MV;
+	chip->bp.fastchg_curr_ma = min(chip->bp.fastchg_curr_ma, fcc);
+	pr_info("fv_uv = %d, cc2cv_mv = %d, fcc_ma = %d, level = %d\n",
+		chip->bp.float_volt_uv, chip->bp.vbatt_full_mv, chip->bp.fastchg_curr_ma, aged_level);
+
+	if (chip->bp.vbatt_full_mv > 0) {
+		if (fg_set_constant_chg_voltage(chip, chip->bp.vbatt_full_mv * 1000)) {
+			return;
+		}
+	}
+}
 
 static void fg_notify_charger(struct fg_chip *chip)
 {
@@ -1148,6 +1226,8 @@ static void fg_notify_charger(struct fg_chip *chip)
 
 	if (!chip->profile_available)
 		return;
+
+	fg_adjust_aged_battery_fv_fcc(chip);
 
 	prop.intval = chip->bp.float_volt_uv;
 	rc = power_supply_set_property(chip->batt_psy,
@@ -1829,9 +1909,9 @@ static int fg_charge_full_update(struct fg_chip *chip)
 	}
 	msoc = DIV_ROUND_CLOSEST(msoc_raw * FULL_CAPACITY, FULL_SOC_RAW);
 
-	fg_dbg(chip, FG_STATUS, "msoc: %d bsoc: %x health: %d status: %d full: %d\n",
+	fg_dbg(chip, FG_STATUS, "msoc: %d bsoc: %x health: %d status: %d full: %d, ch_done: %d\n",
 		msoc, bsoc, chip->health, chip->charge_status,
-		chip->charge_full);
+		chip->charge_full, chip->charge_done);
 	if (chip->charge_done && !chip->charge_full) {
 		if (msoc >= 99 && chip->health == POWER_SUPPLY_HEALTH_GOOD) {
 			fg_dbg(chip, FG_STATUS, "Setting charge_full to true\n");
@@ -2070,17 +2150,33 @@ static int fg_adjust_recharge_soc(struct fg_chip *chip)
 {
 	int rc, msoc, recharge_soc, new_recharge_soc = 0;
 	bool recharge_soc_status;
+	union power_supply_propval prop = {0, };
 
 	if (!chip->dt.auto_recharge_soc)
 		return 0;
 
+	rc = power_supply_get_property(chip->batt_psy, POWER_SUPPLY_PROP_HEALTH,
+			&prop);
+	if (rc < 0) {
+		pr_err("Error in getting battery health, rc=%d.\n", rc);
+		chip->health = POWER_SUPPLY_HEALTH_GOOD;
+	} else {
+		chip->health = prop.intval;
+	}
+
 	recharge_soc = chip->dt.recharge_soc_thr;
 	recharge_soc_status = chip->recharge_soc_adjusted;
+	if (chip->health == POWER_SUPPLY_HEALTH_WARM) {
+		recharge_soc = chip->dt.recharge_soc_thr_warm;
+	}
 	/*
 	 * If the input is present and charging had been terminated, adjust
 	 * the recharge SOC threshold based on the monotonic SOC at which
 	 * the charge termination had happened.
 	 */
+
+	fg_dbg(chip, FG_STATUS, "charge_done %d, recharge_soc_adjusted %d, healthd %d, recharge_soc %d\n",
+		chip->charge_done, chip->recharge_soc_adjusted, chip->health, recharge_soc);
 	if (is_input_present(chip)) {
 		if (chip->charge_done) {
 			if (!chip->recharge_soc_adjusted) {
@@ -3672,7 +3768,7 @@ static int fg_psy_get_property(struct power_supply *psy,
 		rc = fg_get_sram_prop(chip, FG_SRAM_OCV, &pval->intval);
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
-		pval->intval = chip->cl.nom_cap_uah;
+		pval->intval = chip->bp.nom_batt_capacity_uah;/*chip->cl.nom_cap_uah;*/
 		break;
 	case POWER_SUPPLY_PROP_RESISTANCE_ID:
 		pval->intval = chip->batt_id_ohms;
@@ -4390,8 +4486,11 @@ static irqreturn_t fg_delta_batt_temp_irq_handler(int irq, void *data)
 	power_supply_get_property(chip->batt_psy, POWER_SUPPLY_PROP_HEALTH,
 		&prop);
 	chip->health = prop.intval;
+	fg_dbg(chip, FG_IRQ, "health %d, last_batt_temp %d, batt_temp %d\n",
+		chip->health, chip->last_batt_temp, batt_temp);
 
-	if (chip->last_batt_temp != batt_temp) {
+	if (chip->last_batt_temp != batt_temp
+		|| chip->last_health != chip->health) {
 		rc = fg_adjust_timebase(chip);
 		if (rc < 0)
 			pr_err("Error in adjusting timebase, rc=%d\n", rc);
@@ -4402,6 +4501,7 @@ static irqreturn_t fg_delta_batt_temp_irq_handler(int irq, void *data)
 				rc);
 
 		chip->last_batt_temp = batt_temp;
+		chip->last_health = chip->health;
 		power_supply_changed(chip->batt_psy);
 	}
 
@@ -4754,6 +4854,7 @@ static int fg_parse_ki_coefficients(struct fg_chip *chip)
 #define DEFAULT_SYS_TERM_CURR_MA	-125
 #define DEFAULT_DELTA_SOC_THR		1
 #define DEFAULT_RECHARGE_SOC_THR	95
+#define DEFAULT_RECHARGE_SOC_THR_WARM	50
 #define DEFAULT_BATT_TEMP_COLD		0
 #define DEFAULT_BATT_TEMP_COOL		5
 #define DEFAULT_BATT_TEMP_WARM		45
@@ -4926,6 +5027,12 @@ static int fg_parse_dt(struct fg_chip *chip)
 		chip->dt.recharge_soc_thr = DEFAULT_RECHARGE_SOC_THR;
 	else
 		chip->dt.recharge_soc_thr = temp;
+
+	rc = of_property_read_u32(node, "qcom,fg-recharge-soc-thr-warm", &temp);
+        if (rc < 0)
+                chip->dt.recharge_soc_thr_warm = DEFAULT_RECHARGE_SOC_THR_WARM;
+        else
+                chip->dt.recharge_soc_thr_warm = temp;
 
 	rc = of_property_read_u32(node, "qcom,fg-recharge-voltage", &temp);
 	if (rc < 0)

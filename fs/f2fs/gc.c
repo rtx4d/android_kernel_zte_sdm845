@@ -23,12 +23,32 @@
 #include "gc.h"
 #include <trace/events/f2fs.h>
 
+/*ZTE_MODIFY start, if BDF is low, start urgent gc*/
+#ifdef CONFIG_F2FS_STAT_FS
+static bool need_urgent_gc(struct f2fs_sb_info *sbi)
+{
+	if (has_not_enough_free_secs(sbi, 0, 0))
+		return true;
+
+	if (f2fs_is_bdf_low(sbi))
+		return true;
+
+	return false;
+}
+#endif
+/*ZTE_MODIFY end*/
+
 static int gc_thread_func(void *data)
 {
 	struct f2fs_sb_info *sbi = data;
 	struct f2fs_gc_kthread *gc_th = sbi->gc_thread;
 	wait_queue_head_t *wq = &sbi->gc_thread->gc_wait_queue_head;
 	unsigned int wait_ms;
+
+	/*ZTE_MODIFY start*/
+	/*record whether gc thread is waked up by writing gc_urgent sys node*/
+	unsigned int is_urgent_waked = 0;
+	/*ZTE_MODIFY end*/
 
 	wait_ms = gc_th->min_sleep_time;
 
@@ -40,8 +60,12 @@ static int gc_thread_func(void *data)
 				msecs_to_jiffies(wait_ms));
 
 		/* give it a try one time */
-		if (gc_th->gc_wake)
+		if (gc_th->gc_wake) {
 			gc_th->gc_wake = 0;
+			/*ZTE_MODIFY start, the gc thread is waked up by urgent_gc requested by user*/
+			is_urgent_waked = 1;
+			/*ZTE_MODIFY end*/
+		}
 
 		if (try_to_freeze())
 			continue;
@@ -76,13 +100,17 @@ static int gc_thread_func(void *data)
 		 * invalidated soon after by user update or deletion.
 		 * So, I'd like to wait some time to collect dirty segments.
 		 */
-		if (!mutex_trylock(&sbi->gc_mutex))
-			goto next;
-
-		if (gc_th->gc_urgent) {
+		/*ZTE_MODIFY start, if gc_urgent is true and gc thread is waked up by user,
+		  *do gc immediately without checking whether device is idle or not
+		  */
+		if (gc_th->gc_urgent && is_urgent_waked) {
 			wait_ms = gc_th->urgent_sleep_time;
+			mutex_lock(&sbi->gc_mutex);
 			goto do_gc;
 		}
+
+		if (!mutex_trylock(&sbi->gc_mutex))
+			goto next;
 
 		if (!is_idle(sbi)) {
 			increase_sleep_time(gc_th, &wait_ms);
@@ -94,6 +122,19 @@ static int gc_thread_func(void *data)
 			decrease_sleep_time(gc_th, &wait_ms);
 		else
 			increase_sleep_time(gc_th, &wait_ms);
+
+/*ZTE_MODIFY start, adjust wait_ms according to current value of BDF*/
+#ifdef CONFIG_F2FS_STAT_FS
+		update_sit_info(sbi);
+		/*if BDF is low, start urgent gc, try to do bg gc more aggressively*/
+		if (need_urgent_gc(sbi)) {
+			gc_th->gc_urgent = 1;
+			wait_ms = gc_th->urgent_sleep_time;
+		} else {
+			gc_th->gc_urgent = 0;
+		}
+#endif
+/*ZTE_MODIFY end*/
 do_gc:
 		stat_inc_bggc_count(sbi);
 
@@ -132,7 +173,7 @@ int start_gc_thread(struct f2fs_sb_info *sbi)
 
 	gc_th->gc_idle = 0;
 	gc_th->gc_urgent = 0;
-	gc_th->gc_wake= 0;
+	gc_th->gc_wake = 0;
 
 	sbi->gc_thread = gc_th;
 	init_waitqueue_head(&sbi->gc_thread->gc_wait_queue_head);
@@ -161,12 +202,17 @@ static int select_gc_type(struct f2fs_gc_kthread *gc_th, int gc_type)
 {
 	int gc_mode = (gc_type == BG_GC) ? GC_CB : GC_GREEDY;
 
-	if (gc_th && gc_th->gc_idle) {
+	if (!gc_th)
+		return gc_mode;
+
+	if (gc_th->gc_idle) {
 		if (gc_th->gc_idle == 1)
 			gc_mode = GC_CB;
 		else if (gc_th->gc_idle == 2)
 			gc_mode = GC_GREEDY;
 	}
+	if (gc_th->gc_urgent)
+		gc_mode = GC_GREEDY;
 	return gc_mode;
 }
 
@@ -188,11 +234,14 @@ static void select_policy(struct f2fs_sb_info *sbi, int gc_type,
 	}
 
 	/* we need to check every dirty segments in the FG_GC case */
-	if (gc_type != FG_GC && p->max_search > sbi->max_victim_search)
+	if (gc_type != FG_GC &&
+			(sbi->gc_thread && !sbi->gc_thread->gc_urgent) &&
+			p->max_search > sbi->max_victim_search)
 		p->max_search = sbi->max_victim_search;
 
-	/* let's select beginning hot/small space first */
-	if (type == CURSEG_HOT_DATA || IS_NODESEG(type))
+	/* let's select beginning hot/small space first in no_heap mode*/
+	if (test_opt(sbi, NOHEAP) &&
+		(type == CURSEG_HOT_DATA || IS_NODESEG(type)))
 		p->offset = 0;
 	else
 		p->offset = SIT_I(sbi)->last_victim[p->gc_mode];
@@ -1009,6 +1058,12 @@ int f2fs_gc(struct f2fs_sb_info *sbi, bool sync,
 		.iroot = RADIX_TREE_INIT(GFP_NOFS),
 	};
 
+/*ZTE_MODIFY start, if bdf is low, try to garbage collect more times*/
+#ifdef CONFIG_F2FS_STAT_FS
+	int iter = 0;
+#endif
+/*ZTE_MODIFY end*/
+
 	trace_f2fs_gc_begin(sbi->sb, sync, background,
 				get_pages(sbi, F2FS_DIRTY_NODES),
 				get_pages(sbi, F2FS_DIRTY_DENTS),
@@ -1063,7 +1118,15 @@ gc_more:
 		sbi->cur_victim_sec = NULL_SEGNO;
 
 	if (!sync) {
-		if (has_not_enough_free_secs(sbi, sec_freed, 0)) {
+		/*ZTE_MODIFY start, if bdf is low, try to garbage collect more times*/
+#ifdef CONFIG_F2FS_STAT_FS
+		if (has_not_enough_free_secs(sbi, sec_freed, 0) ||
+			(++iter <= BG_GC_ISSUE_RATE))
+#else
+		if (has_not_enough_free_secs(sbi, sec_freed, 0))
+#endif
+		{
+/*ZTE_MODIFY end*/
 			segno = NULL_SEGNO;
 			goto gc_more;
 		}

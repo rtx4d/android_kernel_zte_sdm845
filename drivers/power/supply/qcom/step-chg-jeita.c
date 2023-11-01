@@ -220,6 +220,11 @@ static int get_step_chg_jeita_setting_from_profile(struct step_chg_info *chip)
 
 	profile_node = of_batterydata_get_best_profile(batt_node,
 					batt_id_ohms / 1000, NULL);
+	if (profile_node == NULL) {
+		pr_err("profile_node is null, get one more.\n");
+		profile_node = of_batterydata_get_best_profile(batt_node,
+					batt_id_ohms / 1000, NULL);
+	}
 	if (IS_ERR(profile_node))
 		return PTR_ERR(profile_node);
 

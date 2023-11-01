@@ -63,7 +63,7 @@ TRACE_DEFINE_ENUM(CP_TRIMMED);
 			REQ_PREFLUSH | REQ_FUA)
 #define F2FS_BIO_FLAG_MASK(t)	(t & F2FS_OP_FLAGS)
 
-#define show_bio_type(op,op_flags)	show_bio_op(op),		\
+#define show_bio_type(op, op_flags)	show_bio_op(op),		\
 						show_bio_op_flags(op_flags)
 
 #define show_bio_op(op)							\

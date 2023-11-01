@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -64,7 +64,7 @@ static const char * const clocks[] = {
 	"ahb_clk"
 };
 
-static unsigned long ib_votes[KGSL_MAX_BUSLEVELS];
+static unsigned int ib_votes[KGSL_MAX_BUSLEVELS];
 static int last_vote_buslevel;
 static int max_vote_buslevel;
 
@@ -121,7 +121,7 @@ static void _record_pwrevent(struct kgsl_device *device,
 /**
  * kgsl_get_bw() - Return latest msm bus IB vote
  */
-static unsigned long kgsl_get_bw(void)
+static unsigned int kgsl_get_bw(void)
 {
 	return ib_votes[last_vote_buslevel];
 }
@@ -135,8 +135,8 @@ static unsigned long kgsl_get_bw(void)
 static void _ab_buslevel_update(struct kgsl_pwrctrl *pwr,
 				unsigned long *ab)
 {
-	unsigned long ib = ib_votes[last_vote_buslevel];
-	unsigned long max_bw = ib_votes[max_vote_buslevel];
+	unsigned int ib = ib_votes[last_vote_buslevel];
+	unsigned int max_bw = ib_votes[max_vote_buslevel];
 
 	if (!ab)
 		return;
@@ -2737,25 +2737,6 @@ _aware(struct kgsl_device *device)
 				WARN_ONCE(1, "Failed to recover GMU\n");
 				if (device->snapshot)
 					device->snapshot->recovered = false;
-				/*
-				 * On recovery failure, we are clearing
-				 * GMU_FAULT bit and also not keeping
-				 * the state as RESET to make sure any
-				 * attempt to wake GMU/GPU after this
-				 * is treated as a fresh start. But on
-				 * recovery failure, GMU HS, clocks and
-				 * IRQs are still ON/enabled because of
-				 * which next GMU/GPU wakeup results in
-				 * multiple warnings from GMU start as HS,
-				 * clocks and IRQ were ON while doing a
-				 * fresh start i.e. wake from SLUMBER.
-				 *
-				 * Suspend the GMU on recovery failure
-				 * to make sure next attempt to wake up
-				 * GMU/GPU is indeed a fresh start.
-				 */
-				gmu_suspend(device);
-				gmu->unrecovered = true;
 				kgsl_pwrctrl_set_state(device, state);
 			} else {
 				if (device->snapshot)

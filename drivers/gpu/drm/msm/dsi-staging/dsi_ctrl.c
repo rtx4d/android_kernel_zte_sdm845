@@ -461,7 +461,7 @@ static int dsi_ctrl_init_regmap(struct platform_device *pdev,
 	}
 
 	ctrl->hw.base = ptr;
-	pr_debug("[%s] map dsi_ctrl registers to %pK\n", ctrl->name,
+	pr_debug("[%s] map dsi_ctrl registers to %p\n", ctrl->name,
 		 ctrl->hw.base);
 
 	switch (ctrl->version) {
@@ -498,8 +498,7 @@ static int dsi_ctrl_init_regmap(struct platform_device *pdev,
 static int dsi_ctrl_clocks_deinit(struct dsi_ctrl *ctrl)
 {
 	struct dsi_core_clk_info *core = &ctrl->clk_info.core_clks;
-	struct dsi_link_lp_clk_info *lp_link = &ctrl->clk_info.lp_link_clks;
-	struct dsi_link_hs_clk_info *hs_link = &ctrl->clk_info.hs_link_clks;
+	struct dsi_link_clk_info *link = &ctrl->clk_info.link_clks;
 	struct dsi_clk_link_set *rcg = &ctrl->clk_info.rcg_clks;
 
 	if (core->mdp_core_clk)
@@ -515,17 +514,16 @@ static int dsi_ctrl_clocks_deinit(struct dsi_ctrl *ctrl)
 
 	memset(core, 0x0, sizeof(*core));
 
-	if (hs_link->byte_clk)
-		devm_clk_put(&ctrl->pdev->dev, hs_link->byte_clk);
-	if (hs_link->pixel_clk)
-		devm_clk_put(&ctrl->pdev->dev, hs_link->pixel_clk);
-	if (lp_link->esc_clk)
-		devm_clk_put(&ctrl->pdev->dev, lp_link->esc_clk);
-	if (hs_link->byte_intf_clk)
-		devm_clk_put(&ctrl->pdev->dev, hs_link->byte_intf_clk);
+	if (link->byte_clk)
+		devm_clk_put(&ctrl->pdev->dev, link->byte_clk);
+	if (link->pixel_clk)
+		devm_clk_put(&ctrl->pdev->dev, link->pixel_clk);
+	if (link->esc_clk)
+		devm_clk_put(&ctrl->pdev->dev, link->esc_clk);
+	if (link->byte_intf_clk)
+		devm_clk_put(&ctrl->pdev->dev, link->byte_intf_clk);
 
-	memset(hs_link, 0x0, sizeof(*hs_link));
-	memset(lp_link, 0x0, sizeof(*lp_link));
+	memset(link, 0x0, sizeof(*link));
 
 	if (rcg->byte_clk)
 		devm_clk_put(&ctrl->pdev->dev, rcg->byte_clk);
@@ -542,8 +540,7 @@ static int dsi_ctrl_clocks_init(struct platform_device *pdev,
 {
 	int rc = 0;
 	struct dsi_core_clk_info *core = &ctrl->clk_info.core_clks;
-	struct dsi_link_lp_clk_info *lp_link = &ctrl->clk_info.lp_link_clks;
-	struct dsi_link_hs_clk_info *hs_link = &ctrl->clk_info.hs_link_clks;
+	struct dsi_link_clk_info *link = &ctrl->clk_info.link_clks;
 	struct dsi_clk_link_set *rcg = &ctrl->clk_info.rcg_clks;
 
 	core->mdp_core_clk = devm_clk_get(&pdev->dev, "mdp_core_clk");
@@ -576,30 +573,30 @@ static int dsi_ctrl_clocks_init(struct platform_device *pdev,
 		pr_debug("can't get mnoc clock, rc=%d\n", rc);
 	}
 
-	hs_link->byte_clk = devm_clk_get(&pdev->dev, "byte_clk");
-	if (IS_ERR(hs_link->byte_clk)) {
-		rc = PTR_ERR(hs_link->byte_clk);
+	link->byte_clk = devm_clk_get(&pdev->dev, "byte_clk");
+	if (IS_ERR(link->byte_clk)) {
+		rc = PTR_ERR(link->byte_clk);
 		pr_err("failed to get byte_clk, rc=%d\n", rc);
 		goto fail;
 	}
 
-	hs_link->pixel_clk = devm_clk_get(&pdev->dev, "pixel_clk");
-	if (IS_ERR(hs_link->pixel_clk)) {
-		rc = PTR_ERR(hs_link->pixel_clk);
+	link->pixel_clk = devm_clk_get(&pdev->dev, "pixel_clk");
+	if (IS_ERR(link->pixel_clk)) {
+		rc = PTR_ERR(link->pixel_clk);
 		pr_err("failed to get pixel_clk, rc=%d\n", rc);
 		goto fail;
 	}
 
-	lp_link->esc_clk = devm_clk_get(&pdev->dev, "esc_clk");
-	if (IS_ERR(lp_link->esc_clk)) {
-		rc = PTR_ERR(lp_link->esc_clk);
+	link->esc_clk = devm_clk_get(&pdev->dev, "esc_clk");
+	if (IS_ERR(link->esc_clk)) {
+		rc = PTR_ERR(link->esc_clk);
 		pr_err("failed to get esc_clk, rc=%d\n", rc);
 		goto fail;
 	}
 
-	hs_link->byte_intf_clk = devm_clk_get(&pdev->dev, "byte_intf_clk");
-	if (IS_ERR(hs_link->byte_intf_clk)) {
-		hs_link->byte_intf_clk = NULL;
+	link->byte_intf_clk = devm_clk_get(&pdev->dev, "byte_intf_clk");
+	if (IS_ERR(link->byte_intf_clk)) {
+		link->byte_intf_clk = NULL;
 		pr_debug("can't find byte intf clk, rc=%d\n", rc);
 	}
 
@@ -912,6 +909,10 @@ static int dsi_ctrl_copy_and_pad_cmd(struct dsi_ctrl *dsi_ctrl,
 	if ((buf[2] & 0x3f) == MIPI_DSI_DCS_READ)
 		buf[3] |= BIT(5);
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	if ((buf[2] & 0x3f) == MIPI_DSI_GENERIC_READ_REQUEST_1_PARAM)
+		buf[3] |= BIT(5);
+#endif
 	*buffer = buf;
 	*size = len;
 
@@ -1230,10 +1231,9 @@ kickoff:
 			}
 		}
 
-		if (dsi_ctrl->hw.ops.mask_error_intr &&
-		    !dsi_ctrl->esd_check_underway)
+		if (dsi_ctrl->hw.ops.mask_error_intr)
 			dsi_ctrl->hw.ops.mask_error_intr(&dsi_ctrl->hw,
-						BIT(DSI_FIFO_OVERFLOW), false);
+					BIT(DSI_FIFO_OVERFLOW), false);
 		dsi_ctrl->hw.ops.reset_cmd_fifo(&dsi_ctrl->hw);
 
 		/*
@@ -1264,7 +1264,6 @@ static int dsi_set_max_return_size(struct dsi_ctrl *dsi_ctrl,
 		.type = MIPI_DSI_SET_MAXIMUM_RETURN_PACKET_SIZE,
 		.tx_len = 2,
 		.tx_buf = tx,
-		.flags = rx_msg->flags,
 	};
 
 	rc = dsi_message_tx(dsi_ctrl, &msg, flags);
@@ -1565,7 +1564,11 @@ int dsi_ctrl_buffer_init(struct dsi_ctrl *dsi_ctrl)
 	}
 
 	dsi_ctrl->tx_cmd_buf = msm_gem_new(dsi_ctrl->drm_dev,
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+					   SZ_512K,
+#else
 					   SZ_4K,
+#endif
 					   MSM_BO_UNCACHED);
 
 	if (IS_ERR(dsi_ctrl->tx_cmd_buf)) {
@@ -1575,8 +1578,11 @@ int dsi_ctrl_buffer_init(struct dsi_ctrl *dsi_ctrl)
 		goto error;
 	}
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	dsi_ctrl->cmd_buffer_size = SZ_512K;
+#else
 	dsi_ctrl->cmd_buffer_size = SZ_4K;
-
+#endif
 	rc = msm_gem_get_iova(dsi_ctrl->tx_cmd_buf, aspace, &iova);
 	if (rc) {
 		pr_err("failed to get iova, rc=%d\n", rc);
@@ -2840,8 +2846,7 @@ int dsi_ctrl_cmd_tx_trigger(struct dsi_ctrl *dsi_ctrl, u32 flags)
 						dsi_ctrl->cell_index);
 			}
 		}
-		if (dsi_ctrl->hw.ops.mask_error_intr &&
-				!dsi_ctrl->esd_check_underway)
+		if (dsi_ctrl->hw.ops.mask_error_intr)
 			dsi_ctrl->hw.ops.mask_error_intr(&dsi_ctrl->hw,
 					BIT(DSI_FIFO_OVERFLOW), false);
 
@@ -3339,8 +3344,7 @@ u32 dsi_ctrl_collect_misr(struct dsi_ctrl *dsi_ctrl)
 	return misr;
 }
 
-void dsi_ctrl_mask_error_status_interrupts(struct dsi_ctrl *dsi_ctrl, u32 idx,
-		bool mask_enable)
+void dsi_ctrl_mask_error_status_interrupts(struct dsi_ctrl *dsi_ctrl)
 {
 	if (!dsi_ctrl || !dsi_ctrl->hw.ops.error_intr_ctrl
 			|| !dsi_ctrl->hw.ops.clear_error_status) {
@@ -3353,23 +3357,9 @@ void dsi_ctrl_mask_error_status_interrupts(struct dsi_ctrl *dsi_ctrl, u32 idx,
 	 * register
 	 */
 	mutex_lock(&dsi_ctrl->ctrl_lock);
-	if (idx & BIT(DSI_ERR_INTR_ALL)) {
-		/*
-		 * The behavior of mask_enable is different in ctrl register
-		 * and mask register and hence mask_enable is manipulated for
-		 * selective error interrupt masking vs total error interrupt
-		 * masking.
-		 */
-
-		dsi_ctrl->hw.ops.error_intr_ctrl(&dsi_ctrl->hw, !mask_enable);
-		dsi_ctrl->hw.ops.clear_error_status(&dsi_ctrl->hw,
+	dsi_ctrl->hw.ops.error_intr_ctrl(&dsi_ctrl->hw, false);
+	dsi_ctrl->hw.ops.clear_error_status(&dsi_ctrl->hw,
 					DSI_ERROR_INTERRUPT_COUNT);
-	} else {
-		dsi_ctrl->hw.ops.mask_error_intr(&dsi_ctrl->hw, idx,
-								mask_enable);
-		dsi_ctrl->hw.ops.clear_error_status(&dsi_ctrl->hw,
-					DSI_ERROR_INTERRUPT_COUNT);
-	}
 	mutex_unlock(&dsi_ctrl->ctrl_lock);
 }
 

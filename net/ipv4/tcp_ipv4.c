@@ -1721,6 +1721,22 @@ process:
 	if (!sock_owned_by_user(sk)) {
 		if (!tcp_prequeue(sk, skb))
 			ret = tcp_v4_do_rcv(sk, skb);
+/*ZTE_LC_TCP_DEBUG, 20170417 improved begin*/
+		if (tcp_socket_debugfs & 0x00000001) {
+			if (iph->saddr != htonl(INADDR_LOOPBACK)) {
+				kuid_t uid = sock_i_uid(sk);
+				if (!uid_valid(uid)) uid = GLOBAL_ROOT_UID;
+
+				pr_info("[IP] TCP RCV len=%d, uid=%d, "
+					"Gpid:%d (%s), (%pI4:%hu <- %pI4:%hu)\n",
+					ntohs(iph->tot_len),
+					uid.val,
+					current->group_leader->pid, current->group_leader->comm,
+					&iph->daddr, ntohs(th->dest),
+					&iph->saddr, ntohs(th->source));
+			}
+		}
+/*ZTE_LC_TCP_DEBUG, 20170417 improved end*/
 	} else if (tcp_add_backlog(sk, skb)) {
 		goto discard_and_relse;
 	}

@@ -2015,6 +2015,11 @@ bitmap_iommu_init_mapping(struct device *dev, struct dma_iommu_mapping *mapping)
 	if (!mapping->guard_page)
 		return -ENOMEM;
 
+	mapping->guard_page =
+		arm_smmu_errata_get_guard_page(vmid);
+	if (!mapping->guard_page)
+		return -ENOMEM;
+
 	mapping->bitmap = kzalloc(bitmap_size, GFP_KERNEL | __GFP_NOWARN |
 							__GFP_NORETRY);
 	if (!mapping->bitmap)

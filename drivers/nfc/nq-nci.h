@@ -24,7 +24,7 @@
 #include <linux/miscdevice.h>
 #include <linux/nfcinfo.h>
 
-#define NFC_SET_PWR			_IOW(0xE9, 0x01, unsigned int)
+#define NFC_SET_PWR			_IOW(0xE9, 0x01, long)
 #define ESE_SET_PWR			_IOW(0xE9, 0x02, unsigned int)
 #define ESE_GET_PWR			_IOR(0xE9, 0x03, unsigned int)
 #define SET_RX_BLOCK			_IOW(0xE9, 0x04, unsigned int)

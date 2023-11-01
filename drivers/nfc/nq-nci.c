@@ -246,34 +246,48 @@ static ssize_t nfc_write(struct file *filp, const char __user *buf,
 				size_t count, loff_t *offset)
 {
 	struct nqx_dev *nqx_dev = filp->private_data;
-	char *tmp = NULL;
+	/*char *tmp = NULL;*/
 	int ret = 0;
-
+	char tmp[512];
 	if (!nqx_dev) {
 		ret = -ENODEV;
 		goto out;
 	}
-	if (count > nqx_dev->kbuflen) {
+	if (count > 512)
+		count = 512;
+	pr_err("nq-nci %d : count found\n", (int)count);
+	if (copy_from_user(tmp, buf, count)) {
+		pr_err("%s : failed to copy from user space\n", __func__);
+		return -EFAULT;
+	}
+	/*if (count > nqx_dev->kbuflen) {
 		dev_err(&nqx_dev->client->dev, "%s: out of memory\n",
 			__func__);
 		ret = -ENOMEM;
 		goto out;
-	}
+	}*/
 
-	tmp = memdup_user(buf, count);
+	/*tmp = memdup_user(buf, count);
 	if (IS_ERR(tmp)) {
 		dev_err(&nqx_dev->client->dev, "%s: memdup_user failed\n",
 			__func__);
 		ret = PTR_ERR(tmp);
 		goto out;
-	}
+	}*/
 
 	ret = i2c_master_send(nqx_dev->client, tmp, count);
+	if (ret != count) {
+		usleep_range(6000, 10000);
+		ret = i2c_master_send(nqx_dev->client, tmp, count);
+		dev_err(&nqx_dev->client->dev,
+		"%s: I2C write retry %d\n", __func__, ret);
+	}
 	if (ret != count) {
 		dev_err(&nqx_dev->client->dev,
 		"%s: failed to write %d\n", __func__, ret);
 		ret = -EIO;
-		goto out_free;
+		/*goto out_free;*/
+		goto out;
 	}
 #ifdef NFC_KERNEL_BU
 	dev_dbg(&nqx_dev->client->dev,
@@ -282,8 +296,8 @@ static ssize_t nfc_write(struct file *filp, const char __user *buf,
 			tmp[0], tmp[1], tmp[2]);
 #endif
 	usleep_range(1000, 1100);
-out_free:
-	kfree(tmp);
+/*out_free:
+	kfree(tmp);*/
 out:
 	return ret;
 }
@@ -1059,7 +1073,7 @@ static int nqx_probe(struct i2c_client *client,
 	spin_lock_init(&nqx_dev->irq_enabled_lock);
 
 	nqx_dev->nqx_device.minor = MISC_DYNAMIC_MINOR;
-	nqx_dev->nqx_device.name = "nq-nci";
+	nqx_dev->nqx_device.name = "pn5xx";
 	nqx_dev->nqx_device.fops = &nfc_dev_fops;
 
 	r = misc_register(&nqx_dev->nqx_device);
@@ -1196,11 +1210,19 @@ static int nqx_suspend(struct device *device)
 {
 	struct i2c_client *client = to_i2c_client(device);
 	struct nqx_dev *nqx_dev = i2c_get_clientdata(client);
+	int r = 0;
 
 	if (device_may_wakeup(&client->dev) && nqx_dev->irq_enabled) {
 		if (!enable_irq_wake(client->irq))
 			nqx_dev->irq_wake_up = true;
 	}
+
+	r = nqx_clock_deselect(nqx_dev);
+	if (r < 0)
+		dev_err(&nqx_dev->client->dev, "unable to disable clock\n");
+
+	nqx_dev->nfc_ven_enabled = false;
+
 	return 0;
 }
 
@@ -1208,11 +1230,19 @@ static int nqx_resume(struct device *device)
 {
 	struct i2c_client *client = to_i2c_client(device);
 	struct nqx_dev *nqx_dev = i2c_get_clientdata(client);
+	int r = 0;
 
 	if (device_may_wakeup(&client->dev) && nqx_dev->irq_wake_up) {
 		if (!disable_irq_wake(client->irq))
 			nqx_dev->irq_wake_up = false;
 	}
+
+	r = nqx_clock_select(nqx_dev);
+	if (r < 0)
+		dev_err(&nqx_dev->client->dev, "unable to enable clock\n");
+
+	nqx_dev->nfc_ven_enabled = true;
+
 	return 0;
 }
 

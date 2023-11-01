@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2018, 2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
  *
@@ -156,8 +156,7 @@ void __iomem *msm_ioremap(struct platform_device *pdev, const char *name,
 	}
 
 	if (reglog)
-		dev_dbg(&pdev->dev, "IO:region %s %pK %08lx\n",
-			dbgname, ptr, size);
+		printk(KERN_DEBUG "IO:region %s %p %08lx\n", dbgname, ptr, size);
 
 	return ptr;
 }
@@ -188,7 +187,7 @@ void msm_iounmap(struct platform_device *pdev, void __iomem *addr)
 void msm_writel(u32 data, void __iomem *addr)
 {
 	if (reglog)
-		pr_debug("IO:W %pK %08x\n", addr, data);
+		printk(KERN_DEBUG "IO:W %p %08x\n", addr, data);
 	writel(data, addr);
 }
 
@@ -197,7 +196,7 @@ u32 msm_readl(const void __iomem *addr)
 	u32 val = readl(addr);
 
 	if (reglog)
-		pr_err("IO:R %pK %08x\n", addr, val);
+		printk(KERN_ERR "IO:R %p %08x\n", addr, val);
 	return val;
 }
 
@@ -996,7 +995,7 @@ static int msm_enable_vblank(struct drm_device *dev, unsigned int pipe)
 
 	if (!kms)
 		return -ENXIO;
-	DBG("dev=%pK, crtc=%u", dev, pipe);
+	DBG("dev=%p, crtc=%u", dev, pipe);
 	return vblank_ctrl_queue_work(priv, pipe, true);
 }
 
@@ -1007,7 +1006,7 @@ static void msm_disable_vblank(struct drm_device *dev, unsigned int pipe)
 
 	if (!kms)
 		return;
-	DBG("dev=%pK, crtc=%u", dev, pipe);
+	DBG("dev=%p, crtc=%u", dev, pipe);
 	vblank_ctrl_queue_work(priv, pipe, false);
 }
 
@@ -1289,27 +1288,24 @@ static int msm_ioctl_register_event(struct drm_device *dev, void *data,
 	 * calls add to client list and return.
 	 */
 	count = msm_event_client_count(dev, req_event, false);
-	if (count) {
-		/* Add current client to list */
-		spin_lock_irqsave(&dev->event_lock, flag);
-		list_add_tail(&client->base.link, &priv->client_event_list);
-		spin_unlock_irqrestore(&dev->event_lock, flag);
+	/* Add current client to list */
+	spin_lock_irqsave(&dev->event_lock, flag);
+	list_add_tail(&client->base.link, &priv->client_event_list);
+	spin_unlock_irqrestore(&dev->event_lock, flag);
+
+	if (count)
 		return 0;
-	}
 
 	ret = msm_register_event(dev, req_event, file, true);
 	if (ret) {
 		DRM_ERROR("failed to enable event %x object %x object id %d\n",
 			req_event->event, req_event->object_type,
 			req_event->object_id);
-		kfree(client);
-	} else {
-		/* Add current client to list */
 		spin_lock_irqsave(&dev->event_lock, flag);
-		list_add_tail(&client->base.link, &priv->client_event_list);
+		list_del(&client->base.link);
 		spin_unlock_irqrestore(&dev->event_lock, flag);
+		kfree(client);
 	}
-
 	return ret;
 }
 

@@ -613,7 +613,6 @@ end:
 void sde_connector_helper_bridge_disable(struct drm_connector *connector)
 {
 	int rc;
-	struct sde_connector *c_conn = NULL;
 
 	if (!connector)
 		return;
@@ -623,31 +622,6 @@ void sde_connector_helper_bridge_disable(struct drm_connector *connector)
 		SDE_ERROR("conn %d final pre kickoff failed %d\n",
 				connector->base.id, rc);
 		SDE_EVT32(connector->base.id, SDE_EVTLOG_ERROR);
-	}
-
-	c_conn = to_sde_connector(connector);
-	if (c_conn->panel_dead) {
-		c_conn->bl_device->props.power = FB_BLANK_POWERDOWN;
-		c_conn->bl_device->props.state |= BL_CORE_FBBLANK;
-		backlight_update_status(c_conn->bl_device);
-	}
-}
-
-void sde_connector_helper_bridge_enable(struct drm_connector *connector)
-{
-	struct sde_connector *c_conn = NULL;
-
-	if (!connector)
-		return;
-
-	c_conn = to_sde_connector(connector);
-
-	/* Special handling for ESD recovery case */
-	if (c_conn->panel_dead) {
-		c_conn->bl_device->props.power = FB_BLANK_UNBLANK;
-		c_conn->bl_device->props.state &= ~BL_CORE_FBBLANK;
-		backlight_update_status(c_conn->bl_device);
-		c_conn->panel_dead = false;
 	}
 }
 
@@ -976,38 +950,34 @@ static int _sde_connector_set_ext_hdr_info(
 	struct sde_connector_state *c_state,
 	void *usr_ptr)
 {
-	int rc = 0;
 	struct drm_connector *connector;
 	struct drm_msm_ext_hdr_metadata *hdr_meta;
 	int i;
 
 	if (!c_conn || !c_state) {
 		SDE_ERROR_CONN(c_conn, "invalid args\n");
-		rc = -EINVAL;
-		goto end;
+		return -EINVAL;
 	}
 
 	connector = &c_conn->base;
 
 	if (!connector->hdr_supported) {
 		SDE_ERROR_CONN(c_conn, "sink doesn't support HDR\n");
-		rc = -ENOTSUPP;
-		goto end;
+		return -ENOTSUPP;
 	}
 
 	memset(&c_state->hdr_meta, 0, sizeof(c_state->hdr_meta));
 
 	if (!usr_ptr) {
 		SDE_DEBUG_CONN(c_conn, "hdr metadata cleared\n");
-		goto end;
+		return 0;
 	}
 
 	if (copy_from_user(&c_state->hdr_meta,
 		(void __user *)usr_ptr,
 			sizeof(*hdr_meta))) {
 		SDE_ERROR_CONN(c_conn, "failed to copy hdr metadata\n");
-		rc = -EFAULT;
-		goto end;
+		return -EFAULT;
 	}
 
 	hdr_meta = &c_state->hdr_meta;
@@ -1030,10 +1000,7 @@ static int _sde_connector_set_ext_hdr_info(
 				   hdr_meta->display_primaries_y[i]);
 	}
 
-	if (c_conn->ops.config_hdr)
-		rc = c_conn->ops.config_hdr(c_conn->display, c_state);
-end:
-	return rc;
+	return 0;
 }
 
 static int sde_connector_atomic_set_property(struct drm_connector *connector,
@@ -1427,28 +1394,6 @@ int sde_connector_helper_reset_custom_properties(
 	return 0;
 }
 
-int sde_connector_get_panel_vfp(struct drm_connector *connector,
-	struct drm_display_mode *mode)
-{
-	struct sde_connector *c_conn;
-	int vfp = -EINVAL;
-
-	if (!connector || !mode) {
-		SDE_ERROR("invalid connector\n");
-		return vfp;
-	}
-	c_conn = to_sde_connector(connector);
-	if (!c_conn->ops.get_panel_vfp)
-		return vfp;
-
-	vfp = c_conn->ops.get_panel_vfp(c_conn->display,
-		mode->hdisplay, mode->vdisplay);
-	if (vfp <= 0)
-		SDE_ERROR("Failed get_panel_vfp %d\n", vfp);
-
-	return vfp;
-}
-
 static int _sde_debugfs_conn_cmd_tx_open(struct inode *inode, struct file *file)
 {
 	/* non-seekable */
@@ -1743,67 +1688,12 @@ sde_connector_best_encoder(struct drm_connector *connector)
 	return c_conn->encoder;
 }
 
-static void _sde_connector_report_panel_dead(struct sde_connector *conn)
-{
-	struct drm_event event;
-
-	if (!conn)
-		return;
-
-	/* Panel dead notification can come:
-	 * 1) ESD thread
-	 * 2) Commit thread (if TE stops coming)
-	 * So such case, avoid failure notification twice.
-	 */
-	if (conn->panel_dead)
-		return;
-
-	conn->panel_dead = true;
-	event.type = DRM_EVENT_PANEL_DEAD;
-	event.length = sizeof(bool);
-	msm_mode_object_event_notify(&conn->base.base,
-		conn->base.dev, &event, (u8 *)&conn->panel_dead);
-	sde_encoder_display_failure_notification(conn->encoder);
-	SDE_EVT32(SDE_EVTLOG_ERROR);
-	SDE_ERROR("esd check failed report PANEL_DEAD conn_id: %d enc_id: %d\n",
-			conn->base.base.id, conn->encoder->base.id);
-}
-
-int sde_connector_esd_status(struct drm_connector *conn)
-{
-	struct sde_connector *sde_conn = NULL;
-	int ret = 0;
-
-	if (!conn)
-		return ret;
-
-	sde_conn = to_sde_connector(conn);
-	if (!sde_conn || !sde_conn->ops.check_status)
-		return ret;
-
-	/* protect this call with ESD status check call */
-	mutex_lock(&sde_conn->lock);
-	ret = sde_conn->ops.check_status(sde_conn->display, true);
-	mutex_unlock(&sde_conn->lock);
-
-	if (ret <= 0) {
-		/* cancel if any pending esd work */
-		sde_connector_schedule_status_work(conn, false);
-		_sde_connector_report_panel_dead(sde_conn);
-		ret = -ETIMEDOUT;
-	} else {
-		SDE_DEBUG("Successfully received TE from panel\n");
-		ret = 0;
-	}
-	SDE_EVT32(ret);
-
-	return ret;
-}
-
 static void sde_connector_check_status_work(struct work_struct *work)
 {
 	struct sde_connector *conn;
+	struct drm_event event;
 	int rc = 0;
+	bool panel_dead = false;
 
 	conn = container_of(to_delayed_work(work),
 			struct sde_connector, status_work);
@@ -1820,7 +1710,7 @@ static void sde_connector_check_status_work(struct work_struct *work)
 		return;
 	}
 
-	rc = conn->ops.check_status(conn->display, false);
+	rc = conn->ops.check_status(conn->display);
 	mutex_unlock(&conn->lock);
 
 	if (conn->force_panel_dead) {
@@ -1838,7 +1728,15 @@ static void sde_connector_check_status_work(struct work_struct *work)
 	}
 
 status_dead:
-	_sde_connector_report_panel_dead(conn);
+	SDE_EVT32(rc, SDE_EVTLOG_ERROR);
+	SDE_ERROR("esd check failed report PANEL_DEAD conn_id: %d enc_id: %d\n",
+			conn->base.base.id, conn->encoder->base.id);
+	panel_dead = true;
+	event.type = DRM_EVENT_PANEL_DEAD;
+	event.length = sizeof(bool);
+	msm_mode_object_event_notify(&conn->base.base,
+		conn->base.dev, &event, (u8 *)&panel_dead);
+	sde_encoder_display_failure_notification(conn->encoder);
 }
 
 static const struct drm_connector_helper_funcs sde_connector_helper_ops = {

@@ -38,6 +38,10 @@
 #include "sde_color_processing.h"
 #include "sde_hw_rot.h"
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+#include "dsi_iris2p_api.h"
+#endif
+
 #define SDE_DEBUG_PLANE(pl, fmt, ...) SDE_DEBUG("plane%d " fmt,\
 		(pl) ? (pl)->base.base.id : -1, ##__VA_ARGS__)
 
@@ -1294,6 +1298,11 @@ static void sde_color_process_plane_setup(struct drm_plane *plane)
 
 	psde = to_sde_plane(plane);
 	pstate = to_sde_plane_state(plane->state);
+
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	if (iris_hdr_enable_get())
+		return;
+#endif
 
 	hue = (uint32_t) sde_plane_get_property(pstate, PLANE_PROP_HUE_ADJUST);
 	if (psde->pipe_hw->ops.setup_pa_hue)
@@ -3257,8 +3266,7 @@ static void _sde_plane_sspp_atomic_check_mode_changed(struct sde_plane *psde,
 
 	if (!fb || !old_fb) {
 		SDE_DEBUG_PLANE(psde, "can't compare fb handles\n");
-	} else if ((fb->pixel_format != old_fb->pixel_format) ||
-			pstate->const_alpha_en != old_pstate->const_alpha_en) {
+	} else if (fb->pixel_format != old_fb->pixel_format) {
 		SDE_DEBUG_PLANE(psde, "format change\n");
 		pstate->dirty |= SDE_PLANE_DIRTY_FORMAT | SDE_PLANE_DIRTY_RECTS;
 	} else {

@@ -27,7 +27,6 @@
 #include <linux/cpu.h>
 #include <linux/coresight.h>
 #include <linux/coresight-pmu.h>
-#include <linux/of.h>
 #include <linux/pm_wakeup.h>
 #include <linux/amba/bus.h>
 #include <linux/seq_file.h>
@@ -167,14 +166,12 @@ static void etm4_enable_hw(void *info)
 	writel_relaxed(config->vmid_mask0, drvdata->base + TRCVMIDCCTLR0);
 	writel_relaxed(config->vmid_mask1, drvdata->base + TRCVMIDCCTLR1);
 
-	if (!drvdata->tupwr_disable) {
-		/*
-		 * Request to keep the trace unit powered and also
-		 * emulation of powerdown
-		 */
-		writel_relaxed(readl_relaxed(drvdata->base + TRCPDCR)
-				| TRCPDCR_PU, drvdata->base + TRCPDCR);
-	}
+	/*
+	 * Request to keep the trace unit powered and also
+	 * emulation of powerdown
+	 */
+	writel_relaxed(readl_relaxed(drvdata->base + TRCPDCR) | TRCPDCR_PU,
+		       drvdata->base + TRCPDCR);
 
 	/* Enable the trace unit */
 	writel_relaxed(1, drvdata->base + TRCPRGCTLR);
@@ -315,12 +312,10 @@ static void etm4_disable_hw(void *info)
 
 	CS_UNLOCK(drvdata->base);
 
-	if (!drvdata->tupwr_disable) {
-		/* power can be removed from the trace unit now */
-		control = readl_relaxed(drvdata->base + TRCPDCR);
-		control &= ~TRCPDCR_PU;
-		writel_relaxed(control, drvdata->base + TRCPDCR);
-	}
+	/* power can be removed from the trace unit now */
+	control = readl_relaxed(drvdata->base + TRCPDCR);
+	control &= ~TRCPDCR_PU;
+	writel_relaxed(control, drvdata->base + TRCPDCR);
 
 	control = readl_relaxed(drvdata->base + TRCPRGCTLR);
 
@@ -1040,11 +1035,7 @@ static int etm4_probe(struct amba_device *adev, const struct amba_id *id)
 
 	etmdrvdata[drvdata->cpu] = drvdata;
 
-	drvdata->tupwr_disable = of_property_read_bool(drvdata->dev->of_node,
-				"qcom,tupwr-disable");
-
-	dev_info(dev, "CPU%d: %s initialized\n",
-			drvdata->cpu, (char *)id->data);
+	dev_info(dev, "%s initialized\n", (char *)id->data);
 
 	if (boot_enable) {
 		coresight_enable(drvdata->csdev);
@@ -1063,25 +1054,20 @@ err_arch_supported:
 }
 
 static struct amba_id etm4_ids[] = {
-	{
+	{       /* ETM 4.0 - Cortex-A53  */
 		.id	= 0x000bb95d,
 		.mask	= 0x000fffff,
-		.data	= "Cortex-A53 ETM v4.0",
+		.data	= "ETM 4.0",
 	},
-	{
+	{       /* ETM 4.0 - Cortex-A57 */
 		.id	= 0x000bb95e,
 		.mask	= 0x000fffff,
-		.data	= "Cortex-A57 ETM v4.0",
+		.data	= "ETM 4.0",
 	},
-	{
+	{       /* ETM 4.0 - A72, Maia, HiSilicon */
 		.id = 0x000bb95a,
 		.mask = 0x000fffff,
-		.data	= "Cortex-A72 ETM v4.0",
-	},
-	{
-		.id = 0x000bb959,
-		.mask = 0x000fffff,
-		.data	= "Cortex-A73 ETM v4.0",
+		.data = "ETM 4.0",
 	},
 	{ 0, 0},
 };

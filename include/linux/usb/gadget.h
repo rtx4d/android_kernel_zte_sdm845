@@ -81,12 +81,20 @@ enum gsi_ep_op {
  * @buf_len: Size of each individual buffer is determined based on aggregation
  *	negotiated as per the protocol. In case of no aggregation supported by
  *	the protocol, we use default values.
+ * @db_reg_phs_addr_lsb: IPA channel doorbell register's physical address LSB
+ * @mapped_db_reg_phs_addr_lsb: doorbell LSB IOVA address mapped with IOMMU
+ * @db_reg_phs_addr_msb: IPA channel doorbell register's physical address MSB
  */
 struct usb_gsi_request {
 	void *buf_base_addr;
 	dma_addr_t dma;
 	size_t num_bufs;
 	size_t buf_len;
+	u32 db_reg_phs_addr_lsb;
+	dma_addr_t mapped_db_reg_phs_addr_lsb;
+	u32 db_reg_phs_addr_msb;
+	struct sg_table sgt_trb_xfer_ring;
+	struct sg_table sgt_data_buff;
 };
 
 /*
@@ -137,7 +145,6 @@ struct gsi_channel_info {
  *     by adding a zero length packet as needed;
  * @short_not_ok: When reading data, makes short packets be
  *     treated as errors (queue stops advancing till cleanup).
- * @dma_mapped: Indicates if request has been mapped to DMA (internal)
  * @complete: Function called when request completes, so this request and
  *	its buffer may be re-used.  The function will always be called with
  *	interrupts disabled, and it must not sleep.
@@ -194,7 +201,6 @@ struct usb_request {
 	unsigned		no_interrupt:1;
 	unsigned		zero:1;
 	unsigned		short_not_ok:1;
-	unsigned		dma_mapped:1;
 
 	void			(*complete)(struct usb_ep *ep,
 					struct usb_request *req);

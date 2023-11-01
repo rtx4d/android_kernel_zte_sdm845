@@ -414,7 +414,7 @@ static struct ion_handle* ion_handle_get_check_overflow(struct ion_handle *handl
 
 static int ion_handle_put_nolock(struct ion_handle *handle)
 {
-	int ret;
+	int ret = 0;
 
 	ret = kref_put(&handle->ref, ion_handle_destroy);
 
@@ -865,7 +865,7 @@ static int ion_debug_client_show(struct seq_file *s, void *unused)
 		struct ion_handle *handle = rb_entry(n, struct ion_handle,
 						     node);
 
-		seq_printf(s, "%16.16s: %16zx : %16d : %12pK",
+		seq_printf(s, "%16.16s: %16zx : %16d : %12p",
 			   handle->buffer->heap->name,
 			   handle->buffer->size,
 			   atomic_read(&handle->ref.refcount),

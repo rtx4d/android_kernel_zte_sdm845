@@ -26,6 +26,9 @@
 #include "sde_core_irq.h"
 #include "dsi_panel.h"
 #include "sde_hw_color_processing.h"
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+#include "dsi_iris2p_api.h"
+#endif
 
 struct sde_cp_node {
 	u32 property_id;
@@ -88,7 +91,6 @@ static void sde_cp_ad_set_prop(struct sde_crtc *sde_crtc,
 		enum ad_property ad_prop);
 
 static void sde_cp_notify_hist_event(struct drm_crtc *crtc_drm, void *arg);
-static void sde_cp_update_ad_vsync_prop(struct sde_crtc *sde_crtc, u32 val);
 
 #define setup_dspp_prop_install_funcs(func) \
 do { \
@@ -139,7 +141,6 @@ enum {
 	SDE_CP_CRTC_DSPP_AD_ASSERTIVENESS,
 	SDE_CP_CRTC_DSPP_AD_BACKLIGHT,
 	SDE_CP_CRTC_DSPP_AD_STRENGTH,
-	SDE_CP_CRTC_DSPP_AD_VSYNC_COUNT,
 	SDE_CP_CRTC_DSPP_MAX,
 	/* DSPP features end */
 
@@ -177,6 +178,12 @@ static u32 crtc_feature_map[SDE_CP_CRTC_MAX_FEATURES] = {
 		(p)->feature = feature; \
 		(p)->val = val; \
 	} while (0)
+
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+static int iris_pcc_ops = SDE_CP_CRTC_DSPP_MAX;
+static bool iris_pcc_dirty = false;
+struct sde_cp_node *iris_prop_node[SDE_CP_CRTC_DSPP_MAX] = {};
+#endif
 
 static void sde_cp_get_hw_payload(struct sde_cp_node *prop_node,
 				  struct sde_hw_cp_cfg *hw_cfg,
@@ -409,13 +416,16 @@ void sde_cp_crtc_init(struct drm_crtc *crtc)
 	if (IS_ERR(sde_crtc->hist_blob))
 		sde_crtc->hist_blob = NULL;
 
-	sde_crtc->ad_vsync_count = 0;
 	mutex_init(&sde_crtc->crtc_cp_lock);
 	INIT_LIST_HEAD(&sde_crtc->active_list);
 	INIT_LIST_HEAD(&sde_crtc->dirty_list);
 	INIT_LIST_HEAD(&sde_crtc->feature_list);
 	INIT_LIST_HEAD(&sde_crtc->ad_dirty);
 	INIT_LIST_HEAD(&sde_crtc->ad_active);
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	iris_pcc_ops = SDE_CP_CRTC_DSPP_MAX;
+	memset(iris_prop_node, 0, sizeof(iris_prop_node));
+#endif
 }
 
 static void sde_cp_crtc_install_immutable_property(struct drm_crtc *crtc,
@@ -688,6 +698,11 @@ static void sde_cp_crtc_setfeature(struct sde_cp_node *prop_node,
 				ret = -EINVAL;
 				continue;
 			}
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+			iris_prop_node[prop_node->feature] = prop_node;
+			if (iris_pcc_ops == SDE_CP_CRTC_DSPP_PCC)
+				hw_cfg.payload = NULL;
+#endif
 			hw_dspp->ops.setup_pcc(hw_dspp, &hw_cfg);
 			break;
 		case SDE_CP_CRTC_DSPP_IGC:
@@ -695,6 +710,11 @@ static void sde_cp_crtc_setfeature(struct sde_cp_node *prop_node,
 				ret = -EINVAL;
 				continue;
 			}
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+			iris_prop_node[prop_node->feature] = prop_node;
+			if (iris_pcc_ops == SDE_CP_CRTC_DSPP_PCC)
+				hw_cfg.payload = NULL;
+#endif
 			hw_dspp->ops.setup_igc(hw_dspp, &hw_cfg);
 			break;
 		case SDE_CP_CRTC_DSPP_GC:
@@ -702,6 +722,11 @@ static void sde_cp_crtc_setfeature(struct sde_cp_node *prop_node,
 				ret = -EINVAL;
 				continue;
 			}
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+			iris_prop_node[prop_node->feature] = prop_node;
+			if (iris_pcc_ops == SDE_CP_CRTC_DSPP_PCC)
+				hw_cfg.payload = NULL;
+#endif
 			hw_dspp->ops.setup_gc(hw_dspp, &hw_cfg);
 			break;
 		case SDE_CP_CRTC_DSPP_HSIC:
@@ -790,9 +815,6 @@ static void sde_cp_crtc_setfeature(struct sde_cp_node *prop_node,
 			ad_cfg.prop = AD_MODE;
 			ad_cfg.hw_cfg = &hw_cfg;
 			hw_dspp->ops.setup_ad(hw_dspp, &ad_cfg);
-			sde_crtc->ad_vsync_count = 0;
-			sde_cp_update_ad_vsync_prop(sde_crtc,
-					sde_crtc->ad_vsync_count);
 			break;
 		case SDE_CP_CRTC_DSPP_AD_INIT:
 			if (!hw_dspp || !hw_dspp->ops.setup_ad) {
@@ -802,9 +824,6 @@ static void sde_cp_crtc_setfeature(struct sde_cp_node *prop_node,
 			ad_cfg.prop = AD_INIT;
 			ad_cfg.hw_cfg = &hw_cfg;
 			hw_dspp->ops.setup_ad(hw_dspp, &ad_cfg);
-			sde_crtc->ad_vsync_count = 0;
-			sde_cp_update_ad_vsync_prop(sde_crtc,
-					sde_crtc->ad_vsync_count);
 			break;
 		case SDE_CP_CRTC_DSPP_AD_CFG:
 			if (!hw_dspp || !hw_dspp->ops.setup_ad) {
@@ -814,9 +833,6 @@ static void sde_cp_crtc_setfeature(struct sde_cp_node *prop_node,
 			ad_cfg.prop = AD_CFG;
 			ad_cfg.hw_cfg = &hw_cfg;
 			hw_dspp->ops.setup_ad(hw_dspp, &ad_cfg);
-			sde_crtc->ad_vsync_count = 0;
-			sde_cp_update_ad_vsync_prop(sde_crtc,
-					sde_crtc->ad_vsync_count);
 			break;
 		case SDE_CP_CRTC_DSPP_AD_INPUT:
 			if (!hw_dspp || !hw_dspp->ops.setup_ad) {
@@ -826,9 +842,6 @@ static void sde_cp_crtc_setfeature(struct sde_cp_node *prop_node,
 			ad_cfg.prop = AD_INPUT;
 			ad_cfg.hw_cfg = &hw_cfg;
 			hw_dspp->ops.setup_ad(hw_dspp, &ad_cfg);
-			sde_crtc->ad_vsync_count = 0;
-			sde_cp_update_ad_vsync_prop(sde_crtc,
-					sde_crtc->ad_vsync_count);
 			break;
 		case SDE_CP_CRTC_DSPP_AD_ASSERTIVENESS:
 			if (!hw_dspp || !hw_dspp->ops.setup_ad) {
@@ -838,9 +851,6 @@ static void sde_cp_crtc_setfeature(struct sde_cp_node *prop_node,
 			ad_cfg.prop = AD_ASSERTIVE;
 			ad_cfg.hw_cfg = &hw_cfg;
 			hw_dspp->ops.setup_ad(hw_dspp, &ad_cfg);
-			sde_crtc->ad_vsync_count = 0;
-			sde_cp_update_ad_vsync_prop(sde_crtc,
-					sde_crtc->ad_vsync_count);
 			break;
 		case SDE_CP_CRTC_DSPP_AD_BACKLIGHT:
 			if (!hw_dspp || !hw_dspp->ops.setup_ad) {
@@ -850,9 +860,6 @@ static void sde_cp_crtc_setfeature(struct sde_cp_node *prop_node,
 			ad_cfg.prop = AD_BACKLIGHT;
 			ad_cfg.hw_cfg = &hw_cfg;
 			hw_dspp->ops.setup_ad(hw_dspp, &ad_cfg);
-			sde_crtc->ad_vsync_count = 0;
-			sde_cp_update_ad_vsync_prop(sde_crtc,
-					sde_crtc->ad_vsync_count);
 			break;
 		case SDE_CP_CRTC_DSPP_AD_STRENGTH:
 			if (!hw_dspp || !hw_dspp->ops.setup_ad) {
@@ -862,9 +869,6 @@ static void sde_cp_crtc_setfeature(struct sde_cp_node *prop_node,
 			ad_cfg.prop = AD_STRENGTH;
 			ad_cfg.hw_cfg = &hw_cfg;
 			hw_dspp->ops.setup_ad(hw_dspp, &ad_cfg);
-			sde_crtc->ad_vsync_count = 0;
-			sde_cp_update_ad_vsync_prop(sde_crtc,
-					sde_crtc->ad_vsync_count);
 			break;
 		default:
 			ret = -EINVAL;
@@ -878,6 +882,14 @@ static void sde_cp_crtc_setfeature(struct sde_cp_node *prop_node,
 			prop_node->feature);
 		return;
 	}
+
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	if (iris_pcc_dirty) {
+		DRM_DEBUG_DRIVER("Not update list to feature %d\n",
+			prop_node->feature);
+		return;
+	}
+#endif
 
 	if (feature_enabled) {
 		DRM_DEBUG_DRIVER("Add feature to active list %d\n",
@@ -944,15 +956,13 @@ void sde_cp_crtc_apply_properties(struct drm_crtc *crtc)
 		list_empty(&sde_crtc->ad_dirty)) {
 		if (list_empty(&sde_crtc->ad_active)) {
 			DRM_DEBUG_DRIVER("Dirty list is empty\n");
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+			if (iris_hdr_enable_get() == 0 && iris_pcc_ops == SDE_CP_CRTC_DSPP_MAX)
+#endif
 			goto exit;
 		}
-		set_dspp_flush = true;
-	}
-
-	if (!list_empty(&sde_crtc->ad_active)) {
 		sde_cp_ad_set_prop(sde_crtc, AD_IPC_RESET);
-		sde_cp_ad_set_prop(sde_crtc, AD_VSYNC_UPDATE);
-		sde_cp_update_ad_vsync_prop(sde_crtc, sde_crtc->ad_vsync_count);
+		set_dspp_flush = true;
 	}
 
 	list_for_each_entry_safe(prop_node, n, &sde_crtc->dirty_list,
@@ -974,6 +984,43 @@ void sde_cp_crtc_apply_properties(struct drm_crtc *crtc)
 		else
 			set_lm_flush = true;
 	}
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	iris_pcc_dirty = false;
+	if (iris_hdr_enable_get() > 0 && iris_pcc_ops == SDE_CP_CRTC_DSPP_MAX) {
+		pr_info("iris: HDR-nightlight: hdr enabled\n");
+		iris_pcc_ops = SDE_CP_CRTC_DSPP_PCC;
+		iris_pcc_dirty = true;
+	} else if (iris_hdr_enable_get() == 0 && iris_pcc_ops == SDE_CP_CRTC_DSPP_PCC) {
+		pr_info("iris: HDR-nightlight: hdr disabled\n");
+		iris_pcc_ops = SDE_CP_CRTC_DSPP_MAX;
+		iris_pcc_dirty = true;
+	}
+
+	if (iris_pcc_dirty) {
+		for (i = 0; i < SDE_CP_CRTC_DSPP_MAX; i++) {
+			prop_node = iris_prop_node[i];
+			if (prop_node == NULL)
+				continue;
+			sde_dspp_feature = crtc_feature_map[prop_node->feature];
+			if (!mdss_bus_vote && HIGH_BUS_VOTE_NEEDED(prop_node->feature)
+				&& !reg_dmav1_dspp_feature_support(sde_dspp_feature)) {
+				sde_power_scale_reg_bus(&priv->phandle,
+				sde_kms->core_client,
+				VOTE_INDEX_HIGH, false);
+				pr_debug("Vote HIGH for data bus: feature %d\n",
+				prop_node->feature);
+				mdss_bus_vote = true;
+			}
+			sde_cp_crtc_setfeature(prop_node, sde_crtc);
+			/* Set the flush flag to true */
+			if (prop_node->is_dspp_feature)
+				set_dspp_flush = true;
+			else
+				set_lm_flush = true;
+		}
+		iris_pcc_dirty = false;
+	}
+#endif
 	if (mdss_bus_vote) {
 		sde_power_scale_reg_bus(&priv->phandle, sde_kms->core_client,
 			VOTE_INDEX_LOW, false);
@@ -1275,6 +1322,11 @@ void sde_cp_crtc_suspend(struct drm_crtc *crtc)
 		list_del_init(&prop_node->active_list);
 	}
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	iris_pcc_ops = SDE_CP_CRTC_DSPP_MAX;
+	memset(iris_prop_node, 0, sizeof(iris_prop_node));
+#endif
+
 	list_for_each_entry_safe(prop_node, n, &sde_crtc->ad_active,
 				 active_list) {
 		sde_cp_update_list(prop_node, sde_crtc, true);
@@ -1471,9 +1523,6 @@ static void dspp_ad_install_property(struct drm_crtc *crtc)
 				"SDE_DSPP_AD_V4_BACKLIGHT",
 			SDE_CP_CRTC_DSPP_AD_BACKLIGHT, 0, (BIT(16) - 1),
 			0);
-		sde_cp_crtc_install_range_property(crtc,
-			"SDE_DSPP_AD_V4_VSYNC_COUNT",
-			SDE_CP_CRTC_DSPP_AD_VSYNC_COUNT, 0, U32_MAX, 0);
 		break;
 	default:
 		DRM_ERROR("version %d not supported\n", version);
@@ -1885,11 +1934,6 @@ static void sde_cp_ad_set_prop(struct sde_crtc *sde_crtc,
 		hw_cfg.displayh = num_mixers * hw_lm->cfg.out_width;
 		hw_cfg.displayv = hw_lm->cfg.out_height;
 		hw_cfg.mixer_info = hw_lm;
-
-		if (ad_prop == AD_VSYNC_UPDATE) {
-			hw_cfg.payload = &sde_crtc->ad_vsync_count;
-			hw_cfg.len = sizeof(sde_crtc->ad_vsync_count);
-		}
 		ad_cfg.prop = ad_prop;
 		ad_cfg.hw_cfg = &hw_cfg;
 		ret = hw_dspp->ops.validate_ad(hw_dspp, (u32 *)&ad_prop);
@@ -2120,36 +2164,4 @@ int sde_cp_hist_interrupt(struct drm_crtc *crtc_drm, bool en,
 	}
 exit:
 	return ret;
-}
-
-void sde_cp_update_ad_vsync_count(struct drm_crtc *crtc, u32 val)
-{
-	struct sde_crtc *sde_crtc;
-
-	if (!crtc) {
-		DRM_ERROR("invalid crtc %pK\n", crtc);
-		return;
-	}
-
-	sde_crtc = to_sde_crtc(crtc);
-	if (!sde_crtc) {
-		DRM_ERROR("invalid sde_crtc %pK\n", sde_crtc);
-		return;
-	}
-
-	sde_crtc->ad_vsync_count = val;
-	sde_cp_update_ad_vsync_prop(sde_crtc, val);
-}
-
-static void sde_cp_update_ad_vsync_prop(struct sde_crtc *sde_crtc, u32 val)
-{
-	struct sde_cp_node *prop_node = NULL;
-
-	list_for_each_entry(prop_node, &sde_crtc->feature_list, feature_list) {
-		if (prop_node->feature == SDE_CP_CRTC_DSPP_AD_VSYNC_COUNT) {
-			prop_node->prop_val = val;
-			pr_debug("AD vsync count updated to %d\n", val);
-			return;
-		}
-	}
 }

@@ -136,6 +136,7 @@ struct hrtimer_clock_base {
 	int			index;
 	clockid_t		clockid;
 	struct timerqueue_head	active;
+	ktime_t			resolution;
 	ktime_t			(*get_time)(void);
 	ktime_t			offset;
 } __attribute__((__aligned__(HRTIMER_CLOCK_BASE_ALIGN)));
@@ -409,6 +410,7 @@ static inline void hrtimer_restart(struct hrtimer *timer)
 
 /* Query timers: */
 extern ktime_t __hrtimer_get_remaining(const struct hrtimer *timer, bool adjust);
+extern int hrtimer_get_res(const clockid_t which_clock, struct timespec *tp);
 
 static inline ktime_t hrtimer_get_remaining(const struct hrtimer *timer)
 {

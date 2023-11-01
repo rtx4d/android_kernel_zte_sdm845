@@ -237,11 +237,17 @@ void sde_encoder_prepare_commit(struct drm_encoder *drm_enc);
  */
 int sde_encoder_update_caps_for_cont_splash(struct drm_encoder *encoder);
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+int sde_encoder_wait_idle(struct drm_encoder *drm_enc);
+
+void sde_encoder_rc_unlock(struct drm_encoder *drm_enc);
+void sde_encoder_rc_lock(struct drm_encoder *drm_enc);
+#endif
+
 /**
  * sde_encoder_display_failure_notification - update sde encoder state for
  * esd timeout or other display failure notification. This event flows from
  * dsi, sde_connector to sde_encoder.
- *
  *      TODO: manage the event at sde_kms level for forward processing.
  * @drm_enc:    Pointer to drm encoder structure
  * @Return:     true if successful in updating the encoder structure

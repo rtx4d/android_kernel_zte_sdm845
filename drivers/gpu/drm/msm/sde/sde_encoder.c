@@ -38,6 +38,9 @@
 #include "sde_crtc.h"
 #include "sde_trace.h"
 #include "sde_core_irq.h"
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+#include "../dsi-staging/dsi_iris2p_api.h"
+#endif
 
 #define SDE_DEBUG_ENC(e, fmt, ...) SDE_DEBUG("enc%d " fmt,\
 		(e) ? (e)->base.base.id : -1, ##__VA_ARGS__)
@@ -199,7 +202,6 @@ enum sde_enc_rc_states {
  * @delayed_off_work:		delayed worker to schedule disabling of
  *				clks and resources after IDLE_TIMEOUT time.
  * @vsync_event_work:		worker to handle vsync event for autorefresh
- * @esd_trigger_work:		worker to handle esd trigger events
  * @topology:                   topology of the display
  * @vblank_enabled:		boolean to track userspace vblank vote
  * @rsc_config:			rsc configuration for display vtotal, fps, etc.
@@ -244,7 +246,6 @@ struct sde_encoder_virt {
 	enum sde_enc_rc_states rc_state;
 	struct kthread_delayed_work delayed_off_work;
 	struct kthread_work vsync_event_work;
-	struct kthread_work esd_trigger_work;
 	struct msm_display_topology topology;
 	bool vblank_enabled;
 
@@ -3473,20 +3474,6 @@ static void sde_encoder_vsync_event_handler(unsigned long data)
 				&sde_enc->vsync_event_work);
 }
 
-static void sde_encoder_esd_trigger_work_handler(struct kthread_work *work)
-{
-	struct sde_encoder_virt *sde_enc = container_of(work,
-				struct sde_encoder_virt, esd_trigger_work);
-
-	if (!sde_enc) {
-		SDE_ERROR("invalid sde encoder\n");
-		return;
-	}
-
-	sde_encoder_resource_control(&sde_enc->base,
-			SDE_ENC_RC_EVENT_KICKOFF);
-}
-
 static void sde_encoder_vsync_event_work_handler(struct kthread_work *work)
 {
 	struct sde_encoder_virt *sde_enc = container_of(work,
@@ -3584,6 +3571,9 @@ int sde_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc,
 	uint32_t ln_cnt1, ln_cnt2;
 	unsigned int i;
 	int rc, ret = 0;
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	int vsync_count = 0;
+#endif
 
 	if (!drm_enc || !params || !drm_enc->dev ||
 		!drm_enc->dev->dev_private) {
@@ -3619,6 +3609,12 @@ int sde_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc,
 			if (phys->enable_state == SDE_ENC_ERR_NEEDS_HW_RESET)
 				needs_hw_reset = true;
 			_sde_encoder_setup_dither(phys);
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+			if (phys->intf_mode == INTF_MODE_CMD
+				&& vsync_count == 0) {
+				vsync_count = atomic_read(&phys->vsync_cnt);
+			}
+#endif
 		}
 	}
 	SDE_ATRACE_END("enc_prepare_for_kickoff");
@@ -3650,6 +3646,10 @@ int sde_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc,
 
 	_sde_encoder_update_master(drm_enc, params);
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	irisReportTeCount(vsync_count);
+	iris_cmd_kickoff_proc();
+#endif
 	_sde_encoder_update_roi(drm_enc);
 
 	if (sde_enc->cur_master && sde_enc->cur_master->connector) {
@@ -4355,9 +4355,6 @@ struct drm_encoder *sde_encoder_init(
 	kthread_init_work(&sde_enc->vsync_event_work,
 			sde_encoder_vsync_event_work_handler);
 
-	kthread_init_work(&sde_enc->esd_trigger_work,
-			sde_encoder_esd_trigger_work_handler);
-
 	memcpy(&sde_enc->disp_info, disp_info, sizeof(*disp_info));
 
 	SDE_DEBUG_ENC(sde_enc, "created\n");
@@ -4621,36 +4618,70 @@ int sde_encoder_update_caps_for_cont_splash(struct drm_encoder *encoder)
 	return ret;
 }
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+int sde_encoder_wait_idle(struct drm_encoder *drm_enc)
+{
+	int i = 0;
+	int rc, ret = 0;
+	struct sde_encoder_virt *sde_enc;
+	struct sde_encoder_phys *phys;
+
+	if (!drm_enc || !drm_enc->dev || !drm_enc->dev->dev_private) {
+		SDE_ERROR("invalid encoder parameters\n");
+		return -EINVAL;
+	}
+
+	sde_enc = to_sde_encoder_virt(drm_enc);
+
+	pr_err("sde_enc->num_phys_encs = %d\n", sde_enc->num_phys_encs);
+
+	for (i = 0; i < sde_enc->num_phys_encs; i++) {
+		phys = sde_enc->phys_encs[i];
+
+		if (phys) {
+			if (phys->ops.prepare_for_kickoff) {
+				rc = phys->ops.prepare_for_kickoff(
+						phys, NULL);
+				if (rc) {
+					pr_err("prepare for kickoff rc = %d\n", rc);
+					ret = rc;
+				}
+			}
+			pr_err("here is = %d\n", phys->enable_state);
+			if (phys->enable_state == SDE_ENC_ERR_NEEDS_HW_RESET)
+			_sde_encoder_setup_dither(phys);
+		}
+	}
+	return ret;
+}
+
+void sde_encoder_rc_lock(struct drm_encoder *drm_enc)
+{
+	struct sde_encoder_virt *sde_enc;
+
+	if (!drm_enc || !drm_enc->dev || !drm_enc->dev->dev_private) {
+		SDE_ERROR("invalid encoder parameters\n");
+		return;
+	}
+	sde_enc = to_sde_encoder_virt(drm_enc);
+	mutex_lock(&sde_enc->rc_lock);
+}
+
+void sde_encoder_rc_unlock(struct drm_encoder *drm_enc)
+{
+	struct sde_encoder_virt *sde_enc;
+
+	if (!drm_enc || !drm_enc->dev || !drm_enc->dev->dev_private) {
+		SDE_ERROR("invalid encoder parameters\n");
+		return;
+	}
+	sde_enc = to_sde_encoder_virt(drm_enc);
+	mutex_unlock(&sde_enc->rc_lock);
+}
+#endif
+
 int sde_encoder_display_failure_notification(struct drm_encoder *enc)
 {
-	struct msm_drm_thread *event_thread = NULL;
-	struct msm_drm_private *priv = NULL;
-	struct sde_encoder_virt *sde_enc = NULL;
-
-	if (!enc || !enc->dev || !enc->dev->dev_private) {
-		SDE_ERROR("invalid parameters\n");
-		return -EINVAL;
-	}
-
-	priv = enc->dev->dev_private;
-	sde_enc = to_sde_encoder_virt(enc);
-	if (!sde_enc->crtc || (sde_enc->crtc->index
-			>= ARRAY_SIZE(priv->event_thread))) {
-		SDE_DEBUG_ENC(sde_enc,
-			"invalid cached CRTC: %d or crtc index: %d\n",
-			sde_enc->crtc == NULL,
-			sde_enc->crtc ? sde_enc->crtc->index : -EINVAL);
-		return -EINVAL;
-	}
-
-	SDE_EVT32_VERBOSE(DRMID(enc));
-
-	event_thread = &priv->event_thread[sde_enc->crtc->index];
-
-	kthread_queue_work(&event_thread->worker,
-			   &sde_enc->esd_trigger_work);
-	kthread_flush_work(&sde_enc->esd_trigger_work);
-
 	/**
 	 * panel may stop generating te signal (vsync) during esd failure. rsc
 	 * hardware may hang without vsync. Avoid rsc hang by generating the

@@ -8,3 +8,5 @@ obj-$(CONFIG_QPNP_SMB2)		+= step-chg-jeita.o battery.o qpnp-smb2.o smb-lib.o pmi
 obj-$(CONFIG_SMB138X_CHARGER)	+= step-chg-jeita.o smb138x-charger.o smb-lib.o pmic-voter.o storm-watch.o battery.o
 obj-$(CONFIG_QPNP_QNOVO)	+= qpnp-qnovo.o battery.o
 obj-$(CONFIG_QPNP_TYPEC)	+= qpnp-typec.o
+obj-$(CONFIG_IDTP922X_WIRELESS_CHARGER)	+= idtp922x_wireless_charger.o
+obj-y += zte_misc.o

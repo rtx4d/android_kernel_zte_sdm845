@@ -82,8 +82,6 @@ struct lpm_debug {
 	uint32_t arg4;
 };
 
-static DEFINE_SPINLOCK(bc_timer_lock);
-
 struct lpm_cluster *lpm_root_node;
 
 #define MAXSAMPLES 5
@@ -109,7 +107,7 @@ static DEFINE_PER_CPU(struct lpm_history, hist);
 static DEFINE_PER_CPU(struct lpm_cpu*, cpu_lpm);
 static bool suspend_in_progress;
 static struct hrtimer lpm_hrtimer;
-static DEFINE_PER_CPU(struct hrtimer, histtimer);
+static struct hrtimer histtimer;
 static struct lpm_debug *lpm_debug;
 static phys_addr_t lpm_debug_phys;
 static const int num_dbg_elements = 0x100;
@@ -155,6 +153,7 @@ void lpm_suspend_wake_time(uint64_t wakeup_time)
 		suspend_wake_time = msm_pm_sleep_time_override;
 	else
 		suspend_wake_time = wakeup_time;
+	pr_info("ZTE_ALARM gonna sleep for %llu s,override: %d\n", suspend_wake_time, msm_pm_sleep_time_override);
 }
 EXPORT_SYMBOL(lpm_suspend_wake_time);
 
@@ -348,10 +347,7 @@ static enum hrtimer_restart lpm_hrtimer_cb(struct hrtimer *h)
 
 static void histtimer_cancel(void)
 {
-	unsigned int cpu = raw_smp_processor_id();
-	struct hrtimer *cpu_histtimer = &per_cpu(histtimer, cpu);
-
-	hrtimer_try_to_cancel(cpu_histtimer);
+	hrtimer_try_to_cancel(&histtimer);
 }
 
 static enum hrtimer_restart histtimer_fn(struct hrtimer *h)
@@ -367,11 +363,9 @@ static void histtimer_start(uint32_t time_us)
 {
 	uint64_t time_ns = time_us * NSEC_PER_USEC;
 	ktime_t hist_ktime = ns_to_ktime(time_ns);
-	unsigned int cpu = raw_smp_processor_id();
-	struct hrtimer *cpu_histtimer = &per_cpu(histtimer, cpu);
 
-	cpu_histtimer->function = histtimer_fn;
-	hrtimer_start(cpu_histtimer, hist_ktime, HRTIMER_MODE_REL_PINNED);
+	histtimer.function = histtimer_fn;
+	hrtimer_start(&histtimer, hist_ktime, HRTIMER_MODE_REL_PINNED);
 }
 
 static void cluster_timer_init(struct lpm_cluster *cluster)
@@ -1021,7 +1015,6 @@ static int cluster_configure(struct lpm_cluster *cluster, int idx,
 {
 	struct lpm_cluster_level *level = &cluster->levels[idx];
 	struct cpumask online_cpus;
-	int ret = 0;
 
 	cpumask_and(&online_cpus, &cluster->num_children_in_sync,
 					cpu_online_mask);
@@ -1048,11 +1041,7 @@ static int cluster_configure(struct lpm_cluster *cluster, int idx,
 	if (level->notify_rpm) {
 		clear_predict_history();
 		clear_cl_predict_history();
-
-		spin_lock(&bc_timer_lock);
-		ret = system_sleep_enter();
-		spin_unlock(&bc_timer_lock);
-		if (ret)
+		if (system_sleep_enter())
 			return -EBUSY;
 	}
 	/* Notify cluster enter event after successfully config completion */
@@ -1185,11 +1174,8 @@ static void cluster_unprepare(struct lpm_cluster *cluster,
 
 	level = &cluster->levels[cluster->last_level];
 
-	if (level->notify_rpm) {
-		spin_lock(&bc_timer_lock);
+	if (level->notify_rpm)
 		system_sleep_exit();
-		spin_unlock(&bc_timer_lock);
-	}
 
 	update_debug_pc_event(CLUSTER_EXIT, cluster->last_level,
 			cluster->num_children_in_sync.bits[0],
@@ -1281,7 +1267,6 @@ static bool psci_enter_sleep(struct lpm_cpu *cpu, int idx, bool from_idle)
 {
 	int affinity_level = 0, state_id = 0, power_state = 0;
 	bool success = false;
-	int ret = 0;
 	/*
 	 * idx = 0 is the default LPM state
 	 */
@@ -1294,17 +1279,7 @@ static bool psci_enter_sleep(struct lpm_cpu *cpu, int idx, bool from_idle)
 	}
 
 	if (from_idle && cpu->levels[idx].use_bc_timer) {
-		/*
-		 * tick_broadcast_enter can change the affinity of the
-		 * broadcast timer interrupt, during which interrupt will
-		 * be disabled and enabled back. To avoid system sleep
-		 * doing any interrupt state save or restore in between
-		 * this window hold the lock.
-		 */
-		spin_lock(&bc_timer_lock);
-		ret = tick_broadcast_enter();
-		spin_unlock(&bc_timer_lock);
-		if (ret)
+		if (tick_broadcast_enter())
 			return success;
 	}
 
@@ -1373,6 +1348,9 @@ static void update_history(struct cpuidle_device *dev, int idx)
 	if (history->hptr >= MAXSAMPLES)
 		history->hptr = 0;
 }
+
+extern void zte_pm_vendor_before_powercollapse(void) __attribute__((weak));
+
 
 static int lpm_cpuidle_enter(struct cpuidle_device *dev,
 		struct cpuidle_driver *drv, int idx)
@@ -1646,6 +1624,9 @@ static int lpm_suspend_enter(suspend_state_t state)
 	 */
 	clock_debug_print_enabled(true);
 
+	/*zte_pm  add:suspend->PC, dump sleep gpios*/
+	zte_pm_vendor_before_powercollapse();
+
 	psci_enter_sleep(lpm_cpu, idx, false);
 
 	cluster_unprepare(cluster, cpumask, idx, false, 0);
@@ -1664,8 +1645,6 @@ static int lpm_probe(struct platform_device *pdev)
 {
 	int ret;
 	int size;
-	unsigned int cpu;
-	struct hrtimer *cpu_histtimer;
 	struct kobject *module_kobj = NULL;
 	struct md_region md_entry;
 
@@ -1689,11 +1668,7 @@ static int lpm_probe(struct platform_device *pdev)
 	 */
 	suspend_set_ops(&lpm_suspend_ops);
 	hrtimer_init(&lpm_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	for_each_possible_cpu(cpu) {
-		cpu_histtimer = &per_cpu(histtimer, cpu);
-		hrtimer_init(cpu_histtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	}
-
+	hrtimer_init(&histtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	cluster_timer_init(lpm_root_node);
 
 	size = num_dbg_elements * sizeof(struct lpm_debug);

@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -23,7 +23,6 @@
 			label = "L3";
 			qcom,psci-mode-shift = <4>;
 			qcom,psci-mode-mask = <0xfff>;
-			qcom,clstr-tmr-add = <1000>;
 
 			qcom,pm-cluster-level@0 { /* D1 */
 				reg = <0>;
@@ -78,9 +77,7 @@
 				#size-cells = <0>;
 				qcom,psci-mode-shift = <0>;
 				qcom,psci-mode-mask = <0xf>;
-				qcom,ref-stddev = <500>;
-				qcom,tmr-add = <1000>;
-				qcom,ref-premature-cnt = <1>;
+				qcom,use-prediction;
 				qcom,cpu = <&CPU0 &CPU1 &CPU2 &CPU3 &CPU4
 									&CPU5>;
 
@@ -134,7 +131,6 @@
 				#size-cells = <0>;
 				qcom,psci-mode-shift = <0>;
 				qcom,psci-mode-mask = <0xf>;
-				qcom,disable-prediction;
 				qcom,cpu = <&CPU6 &CPU7>;
 
 				qcom,pm-cpu-level@0 { /* C1 */
@@ -190,8 +186,7 @@
 		reg-names = "phys_addr_base", "offset_addr";
 	};
 
-	qcom,rpmh-master-stats@b221200 {
-		compatible = "qcom,rpmh-master-stats-v1";
-		reg = <0xb221200 0x60>;
+	qcom,rpmh-master-stats {
+		compatible = "qcom,rpmh-master-stats";
 	};
 };
