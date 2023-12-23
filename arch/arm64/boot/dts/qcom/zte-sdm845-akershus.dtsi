@@ -135,8 +135,8 @@
 &soc {
 	rpmh-regulator-bobb1 {
 		qcom,supported-modes =
-			<RPMH_REGULATOR_MODE_SMPS_AUTO
-			 RPMH_REGULATOR_MODE_SMPS_PWM>;
+			<RPMH_REGULATOR_MODE_AUTO
+			 RPMH_REGULATOR_MODE_HPM>;
 		qcom,mode-threshold-currents = <0 2000000>;
 	};
 };
