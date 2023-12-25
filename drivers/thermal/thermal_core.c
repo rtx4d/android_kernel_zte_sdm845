@@ -637,6 +637,34 @@ void thermal_zone_device_update(struct thermal_zone_device *tz,
 }
 EXPORT_SYMBOL_GPL(thermal_zone_device_update);
 
+void thermal_zone_device_update_resume(struct thermal_zone_device *tz,
+				enum thermal_notify_event event)
+{
+	int count;
+
+	/*Dont check in_suspend because the function is called in resume*/
+	/*
+	if (atomic_read(&in_suspend))
+		return;
+	*/
+
+	if (!tz->ops->get_temp)
+		return;
+
+	if (!strcmp(tz->type,"pmi8998_tz")) {
+		pr_info("tz->type=pmi8998_tz, return");
+		return;
+	}
+
+	trace_thermal_device_update(tz, event);
+	update_temperature(tz);
+	thermal_zone_set_trips(tz);
+	tz->notify_event = event;
+
+	for (count = 0; count < tz->trips; count++)
+		handle_thermal_trip(tz, count);
+}
+
 static void thermal_zone_device_check(struct work_struct *work)
 {
 	struct thermal_zone_device *tz = container_of(work, struct
@@ -2589,12 +2617,14 @@ static int thermal_pm_notify(struct notifier_block *nb,
 	case PM_POST_HIBERNATION:
 	case PM_POST_RESTORE:
 	case PM_POST_SUSPEND:
-		atomic_set(&in_suspend, 0);
+		/* Set in_suspend to 0 when the reume is finished. */
+		/*atomic_set(&in_suspend, 0);*/
 		list_for_each_entry(tz, &thermal_tz_list, node) {
 			thermal_zone_device_reset(tz);
-			thermal_zone_device_update(tz,
+			thermal_zone_device_update_resume(tz,
 						   THERMAL_EVENT_UNSPECIFIED);
 		}
+		atomic_set(&in_suspend, 0);
 		break;
 	default:
 		break;

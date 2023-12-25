@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -33,6 +33,7 @@ int32_t cam_cci_i2c_read(struct cam_sensor_cci_client *cci_client,
 	cci_ctrl.cci_info = cci_client;
 	cci_ctrl.cfg.cci_i2c_read_cfg.addr = addr;
 	cci_ctrl.cfg.cci_i2c_read_cfg.addr_type = addr_type;
+	cci_ctrl.cfg.cci_i2c_read_cfg.data_type = data_type;
 	cci_ctrl.cfg.cci_i2c_read_cfg.data = buf;
 	cci_ctrl.cfg.cci_i2c_read_cfg.num_byte = data_type;
 	rc = v4l2_subdev_call(cci_client->cci_subdev,
@@ -59,6 +60,7 @@ int32_t cam_cci_i2c_read(struct cam_sensor_cci_client *cci_client,
 int32_t cam_camera_cci_i2c_read_seq(struct cam_sensor_cci_client *cci_client,
 	uint32_t addr, uint8_t *data,
 	enum camera_sensor_i2c_type addr_type,
+	enum camera_sensor_i2c_type data_type,
 	uint32_t num_byte)
 {
 	int32_t                    rc = -EFAULT;
@@ -67,6 +69,7 @@ int32_t cam_camera_cci_i2c_read_seq(struct cam_sensor_cci_client *cci_client,
 	struct cam_cci_ctrl        cci_ctrl;
 
 	if ((addr_type >= CAMERA_SENSOR_I2C_TYPE_MAX)
+		|| (data_type >= CAMERA_SENSOR_I2C_TYPE_MAX)
 		|| (num_byte > I2C_REG_DATA_MAX)) {
 		CAM_ERR(CAM_SENSOR, "addr_type %d num_byte %d", addr_type,
 			num_byte);
@@ -81,6 +84,7 @@ int32_t cam_camera_cci_i2c_read_seq(struct cam_sensor_cci_client *cci_client,
 	cci_ctrl.cci_info = cci_client;
 	cci_ctrl.cfg.cci_i2c_read_cfg.addr = addr;
 	cci_ctrl.cfg.cci_i2c_read_cfg.addr_type = addr_type;
+	cci_ctrl.cfg.cci_i2c_read_cfg.data_type = data_type;
 	cci_ctrl.cfg.cci_i2c_read_cfg.data = buf;
 	cci_ctrl.cfg.cci_i2c_read_cfg.num_byte = num_byte;
 	cci_ctrl.status = -EFAULT;
@@ -133,6 +137,39 @@ static int32_t cam_cci_i2c_write_table_cmd(
 		usleep_range(write_setting->delay * 1000, (write_setting->delay
 			* 1000) + 1000);
 
+	return rc;
+}
+
+int32_t cam_cci_i2c_write(struct camera_io_master *client,
+	uint32_t addr, uint32_t data, enum camera_sensor_i2c_type addr_type,
+	enum camera_sensor_i2c_type data_type)
+{
+	int32_t rc = -EFAULT;
+	struct cam_cci_ctrl cci_ctrl;
+	struct cam_sensor_i2c_reg_array reg_conf_tbl;
+
+	if (addr_type <= CAMERA_SENSOR_I2C_TYPE_INVALID
+		|| addr_type >= CAMERA_SENSOR_I2C_TYPE_MAX
+		|| data_type <= CAMERA_SENSOR_I2C_TYPE_INVALID
+		|| data_type >= CAMERA_SENSOR_I2C_TYPE_MAX)
+		return rc;
+
+	reg_conf_tbl.reg_addr = addr;
+	reg_conf_tbl.reg_data = data;
+	reg_conf_tbl.delay = 0;
+	cci_ctrl.cmd = MSM_CCI_I2C_WRITE;
+	cci_ctrl.cci_info = client->cci_client;
+	cci_ctrl.cfg.cci_i2c_write_cfg.reg_setting = &reg_conf_tbl;
+	cci_ctrl.cfg.cci_i2c_write_cfg.data_type = data_type;
+	cci_ctrl.cfg.cci_i2c_write_cfg.addr_type = addr_type;
+	cci_ctrl.cfg.cci_i2c_write_cfg.size = 1;
+	rc = v4l2_subdev_call(client->cci_client->cci_subdev,
+			core, ioctl, VIDIOC_MSM_CCI_CFG, &cci_ctrl);
+	if (rc < 0) {
+		pr_err("%s: line %d rc = %d\n", __func__, __LINE__, rc);
+		return rc;
+	}
+	rc = cci_ctrl.status;
 	return rc;
 }
 

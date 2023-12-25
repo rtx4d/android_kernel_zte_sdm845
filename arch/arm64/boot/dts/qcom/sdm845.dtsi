@@ -47,6 +47,7 @@
 		spi0 = &qupv3_se8_spi;
 		i2c0 = &qupv3_se10_i2c;
 		i2c1 = &qupv3_se3_i2c;
+		i2c5 = &qupv3_se5_i2c;
 		hsuart0 = &qupv3_se6_4uart;
 	};
 
@@ -507,7 +508,7 @@
 					dev = "/dev/block/platform/soc/1d84000.ufshc/by-name/vendor";
 					type = "ext4";
 					mnt_flags = "ro,barrier=1,discard";
-					fsmgr_flags = "wait,slotselect,avb";
+					fsmgr_flags = "wait,slotselect";
 				};
 			};
 		};
@@ -2491,7 +2492,7 @@
 		compatible = "qcom,msm_sps_4k";
 		qcom,pipe-attr-ee;
 	};
-
+/*
 	qcom,qbt1000 {
 		compatible = "qcom,qbt1000";
 		clock-names = "core", "iface";
@@ -2499,7 +2500,7 @@
 		qcom,ipc-gpio = <&tlmm 121 0>;
 		qcom,finger-detect-gpio = <&pm8998_gpios 5 0>;
 	};
-
+*/
 	qcom_seecom: qseecom@86d00000 {
 		compatible = "qcom,qseecom";
 		reg = <0x86d00000 0x2200000>;
@@ -3948,7 +3949,7 @@
 	wil6210: qcom,wil6210 {
 		compatible = "qcom,wil6210";
 		qcom,pcie-parent = <&pcie0>;
-		qcom,wigig-en = <&tlmm 39 0>;
+		qcom,wigig-en = <&tlmm 230 0>;
 		qcom,msm-bus,name = "wil6210";
 		qcom,msm-bus,num-cases = <2>;
 		qcom,msm-bus,num-paths = <1>;
@@ -4097,6 +4098,7 @@
 #include "sdm845-audio.dtsi"
 #include "sdm845-gpu.dtsi"
 #include "sdm845-670-usb-common.dtsi"
+#include "sdm845-vendor.dtsi"
 
 &pm8998_temp_alarm {
 	cooling-maps {

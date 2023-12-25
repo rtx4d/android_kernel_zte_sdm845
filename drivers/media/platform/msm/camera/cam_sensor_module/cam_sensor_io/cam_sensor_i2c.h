@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -46,6 +46,7 @@ int32_t cam_cci_i2c_read(struct cam_sensor_cci_client *client,
  * @addr: I2c address
  * @data: I2C data
  * @addr_type: I2c address type
+ * @data_type: I2c data type
  * @num_byte: number of bytes
  *
  * This API handles CCI sequential read
@@ -53,6 +54,7 @@ int32_t cam_cci_i2c_read(struct cam_sensor_cci_client *client,
 int32_t cam_camera_cci_i2c_read_seq(struct cam_sensor_cci_client *client,
 	uint32_t addr, uint8_t *data,
 	enum camera_sensor_i2c_type addr_type,
+	enum camera_sensor_i2c_type data_type,
 	uint32_t num_byte);
 
 /**
@@ -163,6 +165,10 @@ int32_t cam_qup_i2c_poll(struct i2c_client *client,
 int32_t cam_qup_i2c_write_table(
 	struct camera_io_master *client,
 	struct cam_sensor_i2c_reg_setting *write_setting);
+
+int32_t cam_cci_i2c_write(struct camera_io_master *client,
+	uint32_t addr, uint32_t data, enum camera_sensor_i2c_type addr_type,
+	enum camera_sensor_i2c_type data_type);
 
 /**
  * cam_qup_i2c_write_continuous_write: QUP based I2C write continuous(Burst/Seq)

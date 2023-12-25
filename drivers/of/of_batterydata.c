@@ -320,10 +320,12 @@ struct device_node *of_batterydata_get_best_profile(
 {
 	struct batt_ids batt_ids;
 	struct device_node *node, *best_node = NULL;
+	struct device_node *last_node  = NULL;
 	const char *battery_type = NULL;
 	int delta = 0, best_delta = 0, best_id_kohm = 0, id_range_pct,
 		i = 0, rc = 0, limit = 0;
 	bool in_range = false;
+	static bool first_run = true;
 
 	/* read battery id range percentage for best profile */
 	rc = of_property_read_u32(batterydata_container_node,
@@ -338,6 +340,8 @@ struct device_node *of_batterydata_get_best_profile(
 		}
 	}
 
+	pr_info("batt_id_kohm = %d, first_run = %d\n", batt_id_kohm, first_run);
+
 	/*
 	 * Find the battery data with a battery id resistor closest to this one
 	 */
@@ -348,6 +352,8 @@ struct device_node *of_batterydata_get_best_profile(
 			if (!rc && strcmp(battery_type, batt_type) == 0) {
 				best_node = node;
 				best_id_kohm = batt_id_kohm;
+				pr_info("I found the batterydata, node:%s, best_id_kohm=%d\n",
+					batt_type, batt_id_kohm);
 				break;
 			}
 		} else {
@@ -373,13 +379,22 @@ struct device_node *of_batterydata_get_best_profile(
 				}
 			}
 		}
+		if (node != NULL)
+			last_node = node;
 	}
+
+	if ((!first_run) && (best_node == NULL) && (last_node != NULL)) {
+		pr_err("no suitable battery data found, use the last profile as default.\n");
+		best_node = last_node;
+	}
+	first_run = false;
 
 	if (best_node == NULL) {
 		pr_err("No battery data found\n");
 		return best_node;
 	}
 
+#if 0
 	/* check that profile id is in range of the measured batt_id */
 	if (abs(best_id_kohm - batt_id_kohm) >
 			((best_id_kohm * id_range_pct) / 100)) {
@@ -387,6 +402,7 @@ struct device_node *of_batterydata_get_best_profile(
 			best_id_kohm, batt_id_kohm, id_range_pct);
 		return NULL;
 	}
+#endif
 
 	rc = of_property_read_string(best_node, "qcom,battery-type",
 							&battery_type);

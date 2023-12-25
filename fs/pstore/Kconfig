@@ -87,3 +87,9 @@ config PSTORE_RAM
 	  "ramoops.ko".
 
 	  For more information, see Documentation/ramoops.txt.
+
+config PSTORE_REUSE_EXISTING_BUFFER
+	bool "Reuse existing ram buffer"
+	depends on PSTORE
+	depends on PSTORE_RAM
+	default n

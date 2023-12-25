@@ -62,6 +62,8 @@ static char *dp_aux_get_error(u32 aux_error)
 		return DP_AUX_ENUM_STR(DP_AUX_ERR_DEFER);
 	case DP_AUX_ERR_NACK_DEFER:
 		return DP_AUX_ENUM_STR(DP_AUX_ERR_NACK_DEFER);
+	case DP_AUX_ERR_PHY:
+		return DP_AUX_ENUM_STR(DP_AUX_ERR_PHY);
 	default:
 		return "unknown";
 	}

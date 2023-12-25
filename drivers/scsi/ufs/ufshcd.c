@@ -3829,6 +3829,9 @@ int ufshcd_map_desc_id_to_length(struct ufs_hba *hba,
 	case QUERY_DESC_IDN_RFU_1:
 		*desc_len = 0;
 		break;
+	case QUERY_DESC_IDN_RFU_2:
+		*desc_len = hba->desc_size.health_desc;
+		break;
 	default:
 		*desc_len = 0;
 		return -EINVAL;
@@ -3937,6 +3940,16 @@ static inline int ufshcd_read_power_desc(struct ufs_hba *hba,
 int ufshcd_read_device_desc(struct ufs_hba *hba, u8 *buf, u32 size)
 {
 	return ufshcd_read_desc(hba, QUERY_DESC_IDN_DEVICE, 0, buf, size);
+}
+
+int ufshcd_read_geometry_desc(struct ufs_hba *hba, u8 *buf, u32 size)
+{
+	return ufshcd_read_desc(hba, QUERY_DESC_IDN_GEOMETRY, 0, buf, size);
+}
+
+int ufshcd_read_health_desc(struct ufs_hba *hba, u8 *buf, u32 size)
+{
+	return ufshcd_read_desc(hba, QUERY_DESC_IDN_RFU_2, 0, buf, size);
 }
 
 /**
@@ -6496,8 +6509,9 @@ static void ufshcd_rls_handler(struct work_struct *work)
 	u32 mode;
 
 	hba = container_of(work, struct ufs_hba, rls_work);
-	ufshcd_scsi_block_requests(hba);
 	pm_runtime_get_sync(hba->dev);
+	ufshcd_scsi_block_requests(hba);
+
 	ret = ufshcd_wait_for_doorbell_clr(hba, U64_MAX);
 	if (ret) {
 		dev_err(hba->dev,
@@ -7861,6 +7875,11 @@ static void ufshcd_init_desc_sizes(struct ufs_hba *hba)
 		&hba->desc_size.geom_desc);
 	if (err)
 		hba->desc_size.geom_desc = QUERY_DESC_GEOMETRY_DEF_SIZE;
+
+	err = ufshcd_read_desc_length(hba, QUERY_DESC_IDN_RFU_2, 0,
+		&hba->desc_size.health_desc);
+	if (err)
+		hba->desc_size.health_desc = QUERY_DESC_HEALTH_DEF_SIZE;
 }
 
 static void ufshcd_def_desc_sizes(struct ufs_hba *hba)
@@ -7871,6 +7890,65 @@ static void ufshcd_def_desc_sizes(struct ufs_hba *hba)
 	hba->desc_size.conf_desc = QUERY_DESC_CONFIGURATION_DEF_SIZE;
 	hba->desc_size.unit_desc = QUERY_DESC_UNIT_DEF_SIZE;
 	hba->desc_size.geom_desc = QUERY_DESC_GEOMETRY_DEF_SIZE;
+	hba->desc_size.health_desc = QUERY_DESC_HEALTH_DEF_SIZE;
+}
+
+struct ufs_health ufshcd_get_health_descriptor(struct scsi_device *sdev)
+{
+	struct ufs_hba *hba = shost_priv(sdev->host);
+	static struct ufs_health health = {0};
+	int err = 0;
+	u8 desc_buf[QUERY_DESC_HEALTH_DEF_SIZE];
+	u32 bDeviceLifeTimeEstA = 0, bDeviceLifeTimeEstB = 0;
+
+	if (!hba) {
+		return health;
+	}
+
+	pm_runtime_get_sync(hba->dev);
+	err = ufshcd_read_health_desc(hba, desc_buf,
+					QUERY_DESC_HEALTH_DEF_SIZE);
+	if (err) {
+	    pr_err("%s: ufshcd_get_health_descriptor() failed!err =%d\n", __func__, err);
+	} else {
+	    bDeviceLifeTimeEstA = desc_buf[3];
+	    bDeviceLifeTimeEstB = desc_buf[4];
+	    pr_info("%s::bDeviceLifeTimeEstA=0x%x, bDeviceLifeTimeEstB=0x%x\n", __func__, bDeviceLifeTimeEstA, bDeviceLifeTimeEstB);
+	}
+
+	health.bDeviceLifeTimeEstA = bDeviceLifeTimeEstA;
+	health.bDeviceLifeTimeEstB = bDeviceLifeTimeEstB;
+
+	pm_runtime_put_sync(hba->dev);
+
+	return health;
+}
+
+static u64 ufshcd_get_device_capacity(struct scsi_device *sdev)
+{
+	struct ufs_hba *hba = shost_priv(sdev->host);
+	int err;
+	u8 desc_buf[QUERY_DESC_GEOMETRY_DEF_SIZE];
+	u64 device_capacity_512;
+
+	if (!hba)
+		return 0;
+
+	pm_runtime_get_sync(hba->dev);
+	err = ufshcd_read_geometry_desc(hba, desc_buf,
+					QUERY_DESC_GEOMETRY_DEF_SIZE);
+	if (err) {
+	    dev_err(hba->dev, "%s: ufshcd_read_geometry_desc() failed!err =%d\n", __func__, err);
+	    device_capacity_512 = 0;
+	} else
+	    device_capacity_512 = ((u64)desc_buf[4] << 56 | (u64)desc_buf[5] <<  48 |
+				(u64)desc_buf[6] << 40 | (u64)desc_buf[7] << 32 |
+				(u64)desc_buf[8] << 24 | (u64)desc_buf[9] << 16 |
+				(u64)desc_buf[10] << 8 | (u64)desc_buf[11] << 0);
+
+	pm_runtime_put_sync(hba->dev);
+
+	return device_capacity_512;
 }
 
 /**
@@ -8462,6 +8540,8 @@ static struct scsi_host_template ufshcd_driver_template = {
 	.eh_host_reset_handler   = ufshcd_eh_host_reset_handler,
 	.eh_timed_out		= ufshcd_eh_timed_out,
 	.ioctl			= ufshcd_ioctl,
+	.device_capacity	= ufshcd_get_device_capacity,
+	.device_health_descriptor	= ufshcd_get_health_descriptor,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl		= ufshcd_ioctl,
 #endif

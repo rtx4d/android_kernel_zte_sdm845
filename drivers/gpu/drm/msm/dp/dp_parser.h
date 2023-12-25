@@ -205,4 +205,19 @@ struct dp_parser *dp_parser_get(struct platform_device *pdev);
  * @parser: pointer to the parser's data.
  */
 void dp_parser_put(struct dp_parser *parser);
+
+/**
+ * dp_release_pinctrl() - release pinctrl resource
+ *
+ * @parser: pointer to the parser's data.
+ */
+void dp_release_pinctrl(struct dp_parser *parser);
+
+/**
+ * dp_parser_pinctrl() - pinctrl parser
+ *
+ * @parser: pointer to the parser's data.
+ */
+int dp_parser_pinctrl(struct dp_parser *parser);
+
 #endif

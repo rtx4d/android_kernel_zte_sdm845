@@ -19,6 +19,9 @@
 #include <linux/regulator/consumer.h>
 #include <linux/extcon.h>
 #include "storm-watch.h"
+#include <linux/alarmtimer.h>
+#include <linux/wakelock.h>
+#include "zte_misc.h"
 
 enum print_reason {
 	PR_INTERRUPT	= BIT(0),
@@ -26,6 +29,7 @@ enum print_reason {
 	PR_MISC		= BIT(2),
 	PR_PARALLEL	= BIT(3),
 	PR_OTG		= BIT(4),
+	PR_DEBUG	= BIT(5),
 };
 
 #define DEFAULT_VOTER			"DEFAULT_VOTER"
@@ -33,6 +37,7 @@ enum print_reason {
 #define PD_VOTER			"PD_VOTER"
 #define DCP_VOTER			"DCP_VOTER"
 #define QC_VOTER			"QC_VOTER"
+#define DCIN_IL_VOTER			"DCIN_IL_VOTER"
 #define PL_USBIN_USBIN_VOTER		"PL_USBIN_USBIN_VOTER"
 #define USB_PSY_VOTER			"USB_PSY_VOTER"
 #define PL_TAPER_WORK_RUNNING_VOTER	"PL_TAPER_WORK_RUNNING_VOTER"
@@ -56,6 +61,7 @@ enum print_reason {
 #define PD_SUSPEND_SUPPORTED_VOTER	"PD_SUSPEND_SUPPORTED_VOTER"
 #define PL_DELAY_VOTER			"PL_DELAY_VOTER"
 #define CTM_VOTER			"CTM_VOTER"
+#define SW_QC2_VOTER			"SW_QC2_VOTER"
 #define SW_QC3_VOTER			"SW_QC3_VOTER"
 #define AICL_RERUN_VOTER		"AICL_RERUN_VOTER"
 #define LEGACY_UNKNOWN_VOTER		"LEGACY_UNKNOWN_VOTER"
@@ -69,6 +75,9 @@ enum print_reason {
 #define PL_FCC_LOW_VOTER		"PL_FCC_LOW_VOTER"
 #define WBC_VOTER			"WBC_VOTER"
 #define MOISTURE_VOTER			"MOISTURE_VOTER"
+#define BATTCHG_USER_EN_VOTER "BATTCHG_USER_EN_VOTER"
+#define CHARGING_POLICY_FCC_VOTER "CHARGING_POLICY_FCC_VOTER"
+#define CHARGING_POLICY_ICL_VOTER "CHARGING_POLICY_ICL_VOTER"
 
 #define VCONN_MAX_ATTEMPTS	3
 #define OTG_MAX_ATTEMPTS	3
@@ -258,6 +267,9 @@ struct smb_charger {
 	struct power_supply		*batt_psy;
 	struct power_supply		*usb_psy;
 	struct power_supply		*dc_psy;
+	struct power_supply		*wireless_psy;
+	bool wireless_diabled;
+	bool wireless_input_high;
 	struct power_supply		*bms_psy;
 	struct power_supply_desc	usb_psy_desc;
 	struct power_supply		*usb_main_psy;
@@ -310,6 +322,26 @@ struct smb_charger {
 	struct work_struct	legacy_detection_work;
 	struct delayed_work	uusb_otg_work;
 	struct delayed_work	bb_removal_work;
+	struct delayed_work	update_heartbeat_work;
+	struct delayed_work	adaptive_icl_change_work;
+	struct delayed_work	dcin_il_select_work;
+	struct delayed_work	dcin_il_check_work;
+	struct delayed_work	wireless_reset_work;
+	struct delayed_work	typec_insertion_removal_work;
+	struct delayed_work	set_temp_level_work;
+	struct delayed_work	apsd_rerun_work;
+	struct wake_lock		apsd_rerun_wake_lock;
+	struct wake_lock	charger_wake_lock;
+	bool					apsd_rerun_done;
+	struct alarm thermal_alarm;
+
+	#if (EXPIRED_CHARGING_POLICY_ENABLE == 1)
+	struct alarm charging_expired_alarm;
+	#endif
+	struct alarm charging_demo_alarm;
+	struct alarm charging_driver_alarm;
+	struct charging_policy_ops battery_charging_policy_ops;
+	/*struct delayed_work charging_policy_work;*/
 
 	/* cached status */
 	int			voltage_min_uv;
@@ -318,11 +350,14 @@ struct smb_charger {
 	bool			system_suspend_supported;
 	int			boost_threshold_ua;
 	int			system_temp_level;
+	int			system_temp_stored_level;
+	int			system_temp_level_offset;
 	int			thermal_levels;
 	int			*thermal_mitigation;
 	int			dcp_icl_ua;
 	int			fake_capacity;
 	int			fake_batt_status;
+	bool			set_chg_enabled;
 	bool			step_chg_enabled;
 	bool			sw_jeita_enabled;
 	bool			is_hdc;
@@ -446,8 +481,11 @@ int smblib_get_prop_batt_current_now(struct smb_charger *chg,
 				union power_supply_propval *val);
 int smblib_get_prop_batt_temp(struct smb_charger *chg,
 				union power_supply_propval *val);
+int smblib_get_prop_ship_mode(struct smb_charger *chg);
 int smblib_get_prop_batt_charge_counter(struct smb_charger *chg,
 				union power_supply_propval *val);
+int smblib_get_prop_batt_charge_full_design(struct smb_charger *chg,
+				     union power_supply_propval *val);
 int smblib_set_prop_input_suspend(struct smb_charger *chg,
 				const union power_supply_propval *val);
 int smblib_set_prop_batt_capacity(struct smb_charger *chg,
@@ -544,4 +582,28 @@ void smblib_usb_typec_change(struct smb_charger *chg);
 
 int smblib_init(struct smb_charger *chg);
 int smblib_deinit(struct smb_charger *chg);
+int force_hvdcp_qc2p0_to_9v(struct smb_charger *chg);
+int limit_hvdcp_qc3p0_vbus(struct smb_charger *chg);
+int smblib_wipower_init(struct smb_charger *chg);
+
+int smblib_battery_discharging(struct smb_charger *chg);
+int smblib_battery_not_charging(struct smb_charger *chg);
+int smblib_battery_charging(struct smb_charger *chg, bool force);
+int smblib_battery_clean_charging_expired(struct smb_charger *chg);
+int smblib_battery_charging_policy_check(struct smb_charger *chg);
+void smblib_charging_policy_work(struct work_struct *work);
+#if (EXPIRED_CHARGING_POLICY_ENABLE == 1)
+enum alarmtimer_restart smblib_charging_expired_alarm_cb(struct alarm *alarm, ktime_t now);
+#endif
+enum alarmtimer_restart smblib_charging_demo_alarm_cb(struct alarm *alarm, ktime_t now);
+enum alarmtimer_restart smblib_charging_driver_alarm_cb(struct alarm *alarm, ktime_t now);
+int bc_policy_demo_sts_set(struct charging_policy_ops *charging_policy, bool enable);
+int bc_policy_demo_sts_get(struct charging_policy_ops *charging_policy);
+int bc_policy_driver_sts_set(struct charging_policy_ops *charging_policy, bool enable);
+int bc_policy_driver_sts_get(struct charging_policy_ops *charging_policy);
+int bc_policy_expired_sts_get(struct charging_policy_ops *charging_policy);
+int bc_policy_expired_sec_set(struct charging_policy_ops *charging_policy, int sec);
+int bc_policy_expired_sec_get(struct charging_policy_ops *charging_policy);
+int charging_policy_init(struct smb_charger *chg);
+
 #endif /* __SMB2_CHARGER_H */

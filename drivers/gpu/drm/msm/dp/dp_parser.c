@@ -215,10 +215,22 @@ static int dp_parser_misc(struct dp_parser *parser)
 	return 0;
 }
 
-static int dp_parser_pinctrl(struct dp_parser *parser)
+void dp_release_pinctrl(struct dp_parser *parser)
+{
+	struct dp_pinctrl *pinctrl = &parser->pinctrl;
+
+	if (pinctrl->pin) {
+		devm_pinctrl_put(pinctrl->pin);
+		pinctrl->pin = NULL;
+	}
+}
+
+int dp_parser_pinctrl(struct dp_parser *parser)
 {
 	int rc = 0;
 	struct dp_pinctrl *pinctrl = &parser->pinctrl;
+
+	pr_debug("%s\n", __func__);
 
 	pinctrl->pin = devm_pinctrl_get(&parser->pdev->dev);
 
@@ -233,6 +245,7 @@ static int dp_parser_pinctrl(struct dp_parser *parser)
 	if (IS_ERR_OR_NULL(pinctrl->state_active)) {
 		rc = PTR_ERR(pinctrl->state_active);
 		pr_err("failed to get pinctrl active state, rc=%d\n", rc);
+		devm_pinctrl_put(pinctrl->pin);
 		goto error;
 	}
 
@@ -241,6 +254,7 @@ static int dp_parser_pinctrl(struct dp_parser *parser)
 	if (IS_ERR_OR_NULL(pinctrl->state_suspend)) {
 		rc = PTR_ERR(pinctrl->state_suspend);
 		pr_err("failed to get pinctrl suspend state, rc=%d\n", rc);
+		devm_pinctrl_put(pinctrl->pin);
 		goto error;
 	}
 error:
@@ -642,7 +656,6 @@ static int dp_parser_parse(struct dp_parser *parser)
 	if (rc)
 		goto err;
 
-	rc = dp_parser_pinctrl(parser);
 err:
 	return rc;
 }

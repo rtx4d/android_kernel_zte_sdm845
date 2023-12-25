@@ -266,6 +266,7 @@ struct fg_dt_props {
 	int	sys_term_curr_ma;
 	int	delta_soc_thr;
 	int	recharge_soc_thr;
+	int	recharge_soc_thr_warm;
 	int	recharge_volt_thr_mv;
 	int	rsense_sel;
 	int	esr_timer_charging[NUM_ESR_TIMERS];
@@ -309,6 +310,7 @@ struct fg_batt_props {
 	int		float_volt_uv;
 	int		vbatt_full_mv;
 	int		fastchg_curr_ma;
+	int		nom_batt_capacity_uah;
 };
 
 struct fg_cyc_ctr_data {
@@ -392,6 +394,26 @@ static const struct fg_pt fg_tsmc_osc_table[] = {
 	{  90,		444992 },
 };
 
+enum aged_levels {
+	INTACT = 0,
+	SLIGHT,
+	CONVENTIONAL,
+	SEVERE,
+};
+
+struct aged_battery_paras {
+	int level;
+	int fv_minus;
+	int fcc_pct;
+};
+
+static const struct aged_battery_paras aged_battery_paras_table[] = {
+	{ 100, 0, 100 },
+	{ 90, 20, 90 },
+	{ 80, 50, 80 },
+	{ 60, 200, 60 },
+};
+
 struct fg_chip {
 	struct device		*dev;
 	struct pmic_revid_data	*pmic_rev_id;
@@ -441,6 +463,7 @@ struct fg_chip {
 	int			last_soc;
 	int			last_batt_temp;
 	int			health;
+	int			last_health;
 	int			maint_soc;
 	int			delta_soc;
 	int			last_msoc;

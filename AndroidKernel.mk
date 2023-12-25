@@ -51,8 +51,9 @@ ifeq ($(TARGET_PREBUILT_KERNEL),)
 
 KERNEL_GCC_NOANDROID_CHK := $(shell (echo "int main() {return 0;}" | $(KERNEL_CROSS_COMPILE)gcc -E -mno-android - > /dev/null 2>&1 ; echo $$?))
 ifeq ($(strip $(KERNEL_GCC_NOANDROID_CHK)),0)
-KERNEL_CFLAGS := KCFLAGS=-mno-android
+KERNEL_CFLAGS += KCFLAGS+=-mno-android
 endif
+$(warning KERNEL_GCC_NOANDROID_CHK = $(KERNEL_GCC_NOANDROID_CHK) KERNEL_CFLAGS=$(KERNEL_CFLAGS))
 
 mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
 current_dir := $(notdir $(patsubst %/,%,$(dir $(mkfile_path))))
@@ -127,6 +128,8 @@ endif
 $(KERNEL_OUT):
 	mkdir -p $(KERNEL_OUT)
 
+#BEGIN:Modified by chenlu10113951 20170329 for zte-cell; mod:no kernel; exp: compile without kernel
+ifneq ($(NEED_COPILE_LINUX_KERNEL),false)
 $(KERNEL_CONFIG): $(KERNEL_OUT)
 	$(MAKE) -C $(TARGET_KERNEL_SOURCE) O=$(BUILD_ROOT_LOC)$(KERNEL_OUT) $(KERNEL_MAKE_ENV) ARCH=$(KERNEL_ARCH) CROSS_COMPILE=$(KERNEL_CROSS_COMPILE) $(KERNEL_DEFCONFIG)
 	$(hide) if [ ! -z "$(KERNEL_CONFIG_OVERRIDE)" ]; then \
@@ -170,6 +173,9 @@ kernelconfig: $(KERNEL_OUT) $(KERNEL_CONFIG)
 	env KCONFIG_NOTIMESTAMP=true \
 	     $(MAKE) -C $(TARGET_KERNEL_SOURCE) O=$(BUILD_ROOT_LOC)$(KERNEL_OUT) $(KERNEL_MAKE_ENV) ARCH=$(KERNEL_ARCH) CROSS_COMPILE=$(KERNEL_CROSS_COMPILE) savedefconfig
 	cp $(KERNEL_OUT)/defconfig $(TARGET_KERNEL_SOURCE)/arch/$(KERNEL_ARCH)/configs/$(KERNEL_DEFCONFIG)
+
+endif
+#END:Modified by chenlu10113951 20170329 for zte-cell; mod:no kernel; exp: compile without kernel
 
 endif
 endif

@@ -22,6 +22,7 @@
 #include <linux/sched.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <soc/qcom/socinfo.h>
 
 struct boot_stats {
 	uint32_t bootloader_start;
@@ -87,6 +88,35 @@ static void print_boot_stats(void)
 	pr_info("KPI: Kernel MPM Clock frequency = %u\n",
 		mpm_counter_freq);
 }
+
+/*ZTE ADD for BOOT_MODE start*/
+static int __init bootmode_init(char *mode)
+{
+	int boot_mode = 0;
+
+	if (!strncmp(mode, ANDROID_BOOT_MODE_FTM, strlen(ANDROID_BOOT_MODE_FTM))) {
+		boot_mode = ENUM_BOOT_MODE_FTM;
+		pr_info("KERENEL:boot_mode:FTM\n");
+	} else if (!strncmp(mode, ANDROID_BOOT_MODE_FFBM, strlen(ANDROID_BOOT_MODE_FFBM))) {
+		boot_mode = ENUM_BOOT_MODE_FFBM;
+		pr_info("KERENEL:boot_mode:FFBM\n");
+	} else if (!strncmp(mode, ANDROID_BOOT_MODE_RECOVERY, strlen(ANDROID_BOOT_MODE_RECOVERY))) {
+		boot_mode = ENUM_BOOT_MODE_RECOVERY;
+		pr_info("KERENEL:boot_mode:RECOVERY\n");
+	} else if (!strncmp(mode, ANDROID_BOOT_MODE_CHARGER, strlen(ANDROID_BOOT_MODE_CHARGER))) {
+		boot_mode = ENUM_BOOT_MODE_CHARGER;
+		pr_info("KERENEL:boot_mode:CHARGER\n");
+	} else {
+		boot_mode = ENUM_BOOT_MODE_NORMAL;
+		pr_info("KERENEL:boot_mode:DEFAULT NORMAL\n");
+	}
+
+	socinfo_set_boot_mode(boot_mode);
+
+	return 0;
+}
+__setup(ANDROID_BOOT_MODE, bootmode_init);
+/*ZTE ADD for BOOT_MODE end*/
 
 int boot_stats_init(void)
 {

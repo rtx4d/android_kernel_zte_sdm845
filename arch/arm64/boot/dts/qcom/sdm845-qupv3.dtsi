@@ -187,7 +187,16 @@
 		pinctrl-0 = <&qupv3_se5_i2c_active>;
 		pinctrl-1 = <&qupv3_se5_i2c_sleep>;
 		qcom,wrapper-core = <&qupv3_0>;
-		status = "disabled";
+		tfa98xx@35 {
+			compatible = "nxp,tfa9890";
+			reg = <0x35>;
+			reset_gpio= <&tlmm 76 0>;
+		};
+		tfa98xx@34 {
+			compatible = "nxp,tfa9890";
+			reg = <0x34>;
+			reset_gpio= <&tlmm 75 0>;
+		};
 	};
 
 	qupv3_se6_i2c: i2c@898000 {
@@ -338,7 +347,32 @@
 		dmas = <&gpi_dma0 0 4 1 64 0>,
 			<&gpi_dma0 1 4 1 64 0>;
 		dma-names = "tx", "rx";
-		status = "disabled";
+		status = "ok";
+
+		spi_ssx1207@0 {
+			compatible = "veb,veba5-spi";
+			reg = <0>;
+			/*ssx1207-vdd-supply = <&pm8953_l5>;*/
+			/* the unit is mV, fake voltage */
+			voltage-ranges = <2950 2950>;
+			spi-max-frequency = <50000000>;
+			/* reset-gpios = <&tlmm 86 0x0>; */
+			veb_spi_vebv3,reset-gpio = <&tlmm 21 0x0>;
+			veb_spi_vebv3,status-gpio = <&tlmm 30 0x0>;
+			/* veb_spi_vebv3,status-gpio = <&tlmm 90 0x0>; */
+			veb_spi_vebv3,wake-gpio = <&tlmm 44 0x0>;
+			veb_spi_vebv3,power-en-gpio = <&tlmm 29 0>; //3p3
+			spi-cpol = <1>;
+			spi-cpha = <1>;
+
+			pinctrl-names = "wake_rst_sts_poll_up", "wake_poll_down";
+
+			/*pinctrl-0 = <&gpios0_poll_up>;*/
+			/*pinctrl-1 = <&wake0_poll_down>;*/
+
+
+			qcom,use-pinctrl;
+		};
 	};
 
 	qupv3_se5_spi: spi@894000 {

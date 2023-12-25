@@ -217,6 +217,11 @@ struct scsi_device {
 	unsigned long		sdev_data[0];
 } __attribute__((aligned(sizeof(unsigned long))));
 
+struct ufs_health{
+	u32 bDeviceLifeTimeEstA;
+	u32 bDeviceLifeTimeEstB;
+};
+
 #define	to_scsi_device(d)	\
 	container_of(d, struct scsi_device, sdev_gendev)
 #define	class_to_sdev(d)	\

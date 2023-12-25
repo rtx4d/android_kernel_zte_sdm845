@@ -15,6 +15,8 @@
 #include "cam_sensor_soc.h"
 #include "cam_sensor_core.h"
 
+#include "zte_camera_sensor_util.h"
+
 static long cam_sensor_subdev_ioctl(struct v4l2_subdev *sd,
 	unsigned int cmd, void *arg)
 {
@@ -360,6 +362,8 @@ static struct i2c_driver cam_sensor_driver_i2c = {
 static int __init cam_sensor_driver_init(void)
 {
 	int32_t rc = 0;
+
+	msm_sensor_creat_debugfs();
 
 	rc = platform_driver_register(&cam_sensor_platform_driver);
 	if (rc < 0) {

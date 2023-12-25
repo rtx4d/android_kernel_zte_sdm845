@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -351,6 +351,15 @@ static void usb_qmp_update_portselect_phymode(struct msm_ssphy_qmp *phy)
 	switch (phy->phy.type) {
 	case USB_PHY_TYPE_USB3_AND_DP:
 		/* override hardware control for reset of qmp phy */
+		if (phy->phy.flags & USB_PHY_RESET) {
+			if (val > 0) {
+				dev_err(phy->phy.dev,
+					"Pratham :USB QMP PHY: Update TYPEC CTRL(%d)\n", val);
+				writel_relaxed(val, phy->base +
+					phy->phy_reg[USB3_PHY_PCS_MISC_TYPEC_CTRL]);
+			}
+			break;
+		}
 		writel_relaxed(SW_DPPHY_RESET_MUX | SW_DPPHY_RESET |
 			SW_USB3PHY_RESET_MUX | SW_USB3PHY_RESET,
 			phy->base + phy->phy_reg[USB3_DP_COM_RESET_OVRD_CTRL]);
@@ -393,6 +402,11 @@ static void usb_qmp_powerup_phy(struct msm_ssphy_qmp *phy)
 	switch (phy->phy.type) {
 	case USB_PHY_TYPE_USB3_AND_DP:
 		/* power up USB3 and DP common logic block */
+		if (phy->phy.flags & USB_PHY_RESET) {
+			writel_relaxed(0x01,
+				phy->base + phy->phy_reg[USB3_PHY_POWER_DOWN_CONTROL]);
+			break;
+		}
 		writel_relaxed(0x01,
 			phy->base + phy->phy_reg[USB3_DP_COM_POWER_DOWN_CTRL]);
 
@@ -459,7 +473,7 @@ static int msm_ssphy_qmp_init(struct usb_phy *uphy)
 	}
 
 	/* perform software reset of PHY common logic */
-	if (phy->phy.type == USB_PHY_TYPE_USB3_AND_DP)
+	if (phy->phy.type == USB_PHY_TYPE_USB3_AND_DP && (phy->phy.flags & USB_PHY_RESET))
 		writel_relaxed(0x00,
 			phy->base + phy->phy_reg[USB3_DP_COM_SW_RESET]);
 
@@ -491,11 +505,57 @@ static int msm_ssphy_qmp_init(struct usb_phy *uphy)
 	return 0;
 }
 
+static int msm_ssphy_qmp_reset(struct usb_phy *uphy)
+{
+	struct msm_ssphy_qmp *phy = container_of(uphy, struct msm_ssphy_qmp,
+					phy);
+	int ret;
+
+	dev_dbg(uphy->dev, "Resetting QMP phy\n");
+
+	/* Assert USB3 PHY reset */
+
+	/* Assert USB3 PHY CSR reset */
+	ret = reset_control_assert(phy->phy_reset);
+	if (ret) {
+		dev_err(uphy->dev, "phy_reset assert failed\n");
+		goto deassert_phy_phy_reset;
+	}
+
+	/* select usb3 phy mode */
+
+	/* Deassert USB3 PHY CSR reset */
+	ret = reset_control_deassert(phy->phy_reset);
+	if (ret) {
+		dev_err(uphy->dev, "phy_reset deassert failed\n");
+		goto deassert_phy_phy_reset;
+	}
+
+	/* Deassert USB3 PHY reset */
+
+	return 0;
+
+deassert_phy_phy_reset:
+	ret = reset_control_deassert(phy->phy_phy_reset);
+	if (ret)
+		dev_err(uphy->dev, "phy_phy_reset deassert failed\n");
+
+	phy->in_suspend = false;
+
+	return ret;
+}
+
+
 static int msm_ssphy_qmp_dp_combo_reset(struct usb_phy *uphy)
 {
 	struct msm_ssphy_qmp *phy = container_of(uphy, struct msm_ssphy_qmp,
 					phy);
 	int ret = 0;
+
+	if (phy->phy.flags & USB_PHY_RESET) {
+		msm_ssphy_qmp_reset(uphy);
+		return ret;
+	}
 
 	dev_dbg(uphy->dev, "Global reset of QMP DP combo phy\n");
 	/* Assert global PHY reset */
@@ -523,58 +583,6 @@ static int msm_ssphy_qmp_dp_combo_reset(struct usb_phy *uphy)
 		dev_err(uphy->dev, "global_phy_reset deassert failed\n");
 
 exit:
-	return ret;
-}
-
-static int msm_ssphy_qmp_reset(struct usb_phy *uphy)
-{
-	struct msm_ssphy_qmp *phy = container_of(uphy, struct msm_ssphy_qmp,
-					phy);
-	int ret;
-
-	dev_dbg(uphy->dev, "Resetting QMP phy\n");
-
-	/* Assert USB3 PHY reset */
-	ret = reset_control_assert(phy->phy_phy_reset);
-	if (ret) {
-		dev_err(uphy->dev, "phy_phy_reset assert failed\n");
-		goto exit;
-	}
-
-	/* Assert USB3 PHY CSR reset */
-	ret = reset_control_assert(phy->phy_reset);
-	if (ret) {
-		dev_err(uphy->dev, "phy_reset assert failed\n");
-		goto deassert_phy_phy_reset;
-	}
-
-	/* select usb3 phy mode */
-	if (phy->tcsr_usb3_dp_phymode)
-		writel_relaxed(0x0, phy->tcsr_usb3_dp_phymode);
-
-	/* Deassert USB3 PHY CSR reset */
-	ret = reset_control_deassert(phy->phy_reset);
-	if (ret) {
-		dev_err(uphy->dev, "phy_reset deassert failed\n");
-		goto deassert_phy_phy_reset;
-	}
-
-	/* Deassert USB3 PHY reset */
-	ret = reset_control_deassert(phy->phy_phy_reset);
-	if (ret) {
-		dev_err(uphy->dev, "phy_phy_reset deassert failed\n");
-		goto exit;
-	}
-
-	return 0;
-
-deassert_phy_phy_reset:
-	ret = reset_control_deassert(phy->phy_phy_reset);
-	if (ret)
-		dev_err(uphy->dev, "phy_phy_reset deassert failed\n");
-exit:
-	phy->in_suspend = false;
-
 	return ret;
 }
 
@@ -631,6 +639,9 @@ static int msm_ssphy_qmp_set_suspend(struct usb_phy *uphy, int suspend)
 	if (suspend) {
 		if (phy->cable_connected)
 			msm_ssusb_qmp_enable_autonomous(phy, 1);
+		else
+			writel_relaxed(0x00,
+			phy->base + phy->phy_reg[USB3_PHY_POWER_DOWN_CONTROL]);
 
 		/* Make sure above write completed with PHY */
 		wmb();

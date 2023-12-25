@@ -17,6 +17,7 @@
 #include "cam_soc_util.h"
 #include "cam_trace.h"
 
+#include "zte_camera_sensor_util.h"
 
 static void cam_sensor_update_req_mgr(
 	struct cam_sensor_ctrl_t *s_ctrl,
@@ -475,6 +476,7 @@ void cam_sensor_query_cap(struct cam_sensor_ctrl_t *s_ctrl,
 		s_ctrl->soc_info.index;
 }
 
+#if 0
 static uint16_t cam_sensor_id_by_mask(struct cam_sensor_ctrl_t *s_ctrl,
 	uint32_t chipid)
 {
@@ -492,6 +494,27 @@ static uint16_t cam_sensor_id_by_mask(struct cam_sensor_ctrl_t *s_ctrl,
 		sensor_id >>= 1;
 	}
 	return sensor_id;
+}
+#endif
+
+static int cam_sensor_id_match_by_mask(struct cam_sensor_ctrl_t *s_ctrl,
+	uint32_t chipid, uint16_t slave_id)
+{
+	uint16_t sensor_id = (uint16_t)(chipid & 0xFFFF);
+	uint16_t sensor_match_id = slave_id;
+	int16_t sensor_id_mask = s_ctrl->sensordata->slave_info.sensor_id_mask;
+	int rc = 0;
+
+	if (!sensor_id_mask)
+		sensor_id_mask = ~sensor_id_mask;
+
+	sensor_id &= sensor_id_mask;
+	sensor_match_id &= sensor_id_mask;
+
+	if (sensor_id != sensor_match_id)
+		rc = -ENODEV;
+
+	return rc;
 }
 
 void cam_sensor_shutdown(struct cam_sensor_ctrl_t *s_ctrl)
@@ -518,6 +541,8 @@ void cam_sensor_shutdown(struct cam_sensor_ctrl_t *s_ctrl)
 
 	kfree(power_info->power_setting);
 	kfree(power_info->power_down_setting);
+	power_info->power_setting = NULL;
+	power_info->power_down_setting = NULL;
 
 	s_ctrl->streamon_count = 0;
 	s_ctrl->streamoff_count = 0;
@@ -546,11 +571,19 @@ int cam_sensor_match_id(struct cam_sensor_ctrl_t *s_ctrl)
 
 	CAM_DBG(CAM_SENSOR, "read id: 0x%x expected id 0x%x:",
 			 chipid, slave_info->sensor_id);
+#if 0
 	if (cam_sensor_id_by_mask(s_ctrl, chipid) != slave_info->sensor_id) {
 		CAM_ERR(CAM_SENSOR, "chip id %x does not match %x",
 				chipid, slave_info->sensor_id);
 		return -ENODEV;
 	}
+#else
+	if (cam_sensor_id_match_by_mask(s_ctrl, chipid, slave_info->sensor_id) != 0) {
+		CAM_ERR(CAM_SENSOR, "chip id %x does not match %x",
+				chipid, slave_info->sensor_id);
+		return -ENODEV;
+	}
+#endif
 	return rc;
 }
 
@@ -584,24 +617,6 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 				"Already Sensor Probed in the slot");
 			break;
 		}
-		/* Allocate memory for power up setting */
-		pu = kzalloc(sizeof(struct cam_sensor_power_setting) *
-			MAX_POWER_CONFIG, GFP_KERNEL);
-		if (!pu) {
-			rc = -ENOMEM;
-			goto release_mutex;
-		}
-
-		pd = kzalloc(sizeof(struct cam_sensor_power_setting) *
-			MAX_POWER_CONFIG, GFP_KERNEL);
-		if (!pd) {
-			kfree(pu);
-			rc = -ENOMEM;
-			goto release_mutex;
-		}
-
-		power_info->power_setting = pu;
-		power_info->power_down_setting = pd;
 
 		if (cmd->handle_type ==
 			CAM_HANDLE_MEM_HANDLE) {
@@ -617,6 +632,9 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 				 cmd->handle_type);
 			return -EINVAL;
 		}
+
+		pu = power_info->power_setting;
+		pd = power_info->power_down_setting;
 
 		/* Parse and fill vreg params for powerup settings */
 		rc = msm_camera_fill_vreg_params(
@@ -684,6 +702,9 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		 */
 		s_ctrl->is_probe_succeed = 1;
 		s_ctrl->sensor_state = CAM_SENSOR_INIT;
+
+		if (!msm_sensor_enable_debugfs(s_ctrl))
+			msm_sensor_register_sysdev(s_ctrl);
 	}
 		break;
 	case CAM_ACQUIRE_DEV: {

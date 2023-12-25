@@ -51,7 +51,7 @@
 			compatible = "qcom,memshare-peripheral";
 			qcom,peripheral-size = <0x500000>;
 			qcom,client-id = <1>;
-			qcom,allocate-boot-time;
+			qcom,allocate-on-request;
 			label = "modem";
 		};
 	};
@@ -470,6 +470,7 @@
 			2784000 35000
 			2803200 40000
 			2841600 50000
+			2956800 60000
 		>;
 		idle-cost-data = <
 			100 80 60 40
@@ -537,6 +538,7 @@
 			2784000 165
 			2803200 170
 			2841600 180
+			2956800 190
 		>;
 		idle-cost-data = <
 			4 3 2 1
@@ -663,7 +665,7 @@
 			    0x0a 0x184 /* PLL_LOCK_DELAY */
 			    0x19 0xb4  /* PLL_DIGITAL_TIMERS_TWO */
 			    0x40 0x194 /* PLL_BIAS_CONTROL_1 */
-			    0x20 0x198 /* PLL_BIAS_CONTROL_2 */
+			    0x10 0x198 /* PLL_BIAS_CONTROL_2 */
 			    0x21 0x214 /* PWR_CTRL2 */
 			    0x08 0x220 /* IMP_CTRL1 */
 			    0x58 0x224 /* IMP_CTRL2 */

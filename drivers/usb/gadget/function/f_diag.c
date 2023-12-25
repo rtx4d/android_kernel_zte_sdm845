@@ -45,6 +45,8 @@ struct dload_struct {
 	uint32_t	pid;
 	char		serial_number[SERIAL_NUMBER_LENGTH];
 	struct magic_num_struct magic_struct;
+	/* Use Qualcomm's usb vid and pid if enters download due to panic. */
+	uint8_t   dload_info_free[2];
 };
 
 /* for configfs support */
@@ -63,7 +65,20 @@ static DEFINE_SPINLOCK(ch_lock);
 static LIST_HEAD(usb_diag_ch_list);
 
 static struct dload_struct __iomem *diag_dload;
+/* Use Qualcomm's usb vid and pid if enters download due to panic. */
+void use_qualcomm_usb_product_id(void)
+{
+	if (!diag_dload) {
+		pr_debug("%s: unable to update product id\n", __func__);
+		return;
+	}
 
+	/*
+	 * 0x55 -> 01010101, used for verification in memory
+	 * which could be changed by modem
+	 */
+	diag_dload->dload_info_free[0] = 0x55;
+}
 static struct usb_interface_descriptor intf_desc = {
 	.bLength            =	sizeof(intf_desc),
 	.bDescriptorType    =	USB_DT_INTERFACE,

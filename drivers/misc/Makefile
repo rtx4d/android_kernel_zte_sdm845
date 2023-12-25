@@ -48,6 +48,7 @@ obj-$(CONFIG_VMWARE_VMCI)	+= vmw_vmci/
 obj-$(CONFIG_LATTICE_ECP3_CONFIG)	+= lattice-ecp3-config.o
 obj-$(CONFIG_SRAM)		+= sram.o
 obj-y				+= mic/
+obj-$(CONFIG_SAFECHIP_VEB_A5)	+= veb_a5spi_driver/
 obj-$(CONFIG_GENWQE)		+= genwqe/
 obj-$(CONFIG_HDCP_QSEECOM)	+= hdcp.o
 obj-$(CONFIG_QSEECOM)		+= qseecom.o

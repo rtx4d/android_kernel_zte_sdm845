@@ -36,6 +36,27 @@
 
 #define DSI_MODE_MAX 5
 
+/*zte add common function for lcd module begin*/
+#ifdef CONFIG_ZTE_LCD_COMMON_FUNCTION
+struct zte_lcd_ctrl_data {
+	const char *lcd_panel_name;
+	const char *lcd_init_code_version;
+	char lcd_reset_high_sleeping;
+#ifdef CONFIG_ZTE_LCD_BACKLIGHT_LEVEL_CURVE
+	u32 lcd_bl_curve_mode;
+	int (*zte_convert_brightness)(int level, u32 bl_max);
+#endif
+#ifdef CONFIG_ZTE_LCD_GPIO_CTRL_POWER
+	int disp_avdd_en_gpio;
+	int disp_iovdd_en_gpio;
+	int disp_vsp_en_gpio;
+	int disp_vsn_en_gpio;
+	int (*gpio_enable_lcd_power)(int enable);
+#endif
+};
+#endif
+/*zte add common function for lcd module end*/
+
 enum dsi_panel_rotation {
 	DSI_PANEL_ROTATE_NONE = 0,
 	DSI_PANEL_ROTATE_HV_FLIP,
@@ -140,6 +161,16 @@ struct drm_panel_esd_config {
 	u32 groups;
 };
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+struct dsp_config{
+	int dsp_reset_gpio;
+	int dsp_1v1;
+	int dsp_wakeup;
+	int dsp_gpio_test;
+	struct clk *div_clk3;
+};
+#endif
+
 struct dsi_panel {
 	const char *name;
 	struct device_node *panel_of_node;
@@ -180,6 +211,15 @@ struct dsi_panel {
 	enum dsi_dms_mode dms_mode;
 
 	bool sync_broadcast_en;
+
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	struct dsp_config dsp_cfg;
+#endif
+/*zte add common function for lcd module begin*/
+#ifdef CONFIG_ZTE_LCD_COMMON_FUNCTION
+	struct zte_lcd_ctrl_data *zte_lcd_ctrl;
+#endif
+/*zte add common function for lcd module end*/
 };
 
 static inline bool dsi_panel_ulps_feature_enabled(struct dsi_panel *panel)
@@ -271,7 +311,14 @@ int dsi_panel_post_switch(struct dsi_panel *panel);
 
 void dsi_dsc_pclk_param_calc(struct msm_display_dsc_info *dsc, int intf_width);
 
+
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+int dsi_dsp_pt_power(struct dsi_panel *panel, bool enable);
+int iris_work_enable(bool enable);
+#endif
+
 int dsi_panel_parse_esd_reg_read_configs(struct dsi_panel *panel,
 				struct device_node *of_node);
+
 
 #endif /* _DSI_PANEL_H_ */

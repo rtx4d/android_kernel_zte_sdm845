@@ -1021,6 +1021,12 @@ static void _sde_sspp_setup_vig(struct sde_mdss_cfg *sde_cfg,
 		sblk->pcc_blk.len = 0;
 		set_bit(SDE_SSPP_PCC, &sspp->features);
 	}
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	clear_bit(SDE_SSPP_PCC, &sspp->features);
+	clear_bit(SDE_SSPP_HSIC, &sspp->features);
+	clear_bit(SDE_SSPP_MEMCOLOR, &sspp->features);
+	clear_bit(SDE_SSPP_IGC, &sspp->features);
+#endif
 
 	sblk->format_list = sde_cfg->vig_formats;
 	sblk->virt_format_list = sde_cfg->dma_formats;
@@ -1820,6 +1826,17 @@ static void _sde_dspp_setup_blocks(struct sde_mdss_cfg *sde_cfg,
 		sblk->sixzone.len = 0;
 		set_bit(SDE_DSPP_VLUT, &dspp->features);
 	}
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	clear_bit(SDE_DSPP_VLUT, &dspp->features);
+	clear_bit(SDE_DSPP_SIXZONE, &dspp->features);
+	clear_bit(SDE_DSPP_MEMCOLOR, &dspp->features);
+	clear_bit(SDE_DSPP_HSIC, &dspp->features);
+	//clear_bit(SDE_DSPP_IGC, &dspp->features);
+	//clear_bit(SDE_DSPP_PCC, &dspp->features);
+	//clear_bit(SDE_DSPP_GC, &dspp->features);
+	clear_bit(SDE_DSPP_GAMUT, &dspp->features);
+	clear_bit(SDE_DSPP_HIST, &dspp->features);
+#endif
 }
 
 static void _sde_inline_rot_parse_dt(struct device_node *np,
@@ -2126,6 +2143,9 @@ static int sde_dspp_parse_dt(struct device_node *np,
 			sblk->ad.version = PROP_VALUE_ACCESS(ad_prop_value,
 				AD_VERSION, 0);
 			set_bit(SDE_DSPP_AD, &dspp->features);
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+			clear_bit(SDE_DSPP_AD, &dspp->features);
+#endif
 		}
 	}
 

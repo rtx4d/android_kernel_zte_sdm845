@@ -131,6 +131,10 @@ EXPORT_SYMBOL(sysctl_udp_wmem_min);
 atomic_long_t udp_memory_allocated;
 EXPORT_SYMBOL(udp_memory_allocated);
 
+/*ZTE_LC_TCP_DEBUG, 20170417 improved  start*/
+extern int tcp_socket_debugfs;
+/*ZTE_LC_TCP_DEBUG,  end*/
+
 #define MAX_UDP_PORTS 65536
 #define PORTS_PER_CHAIN (MAX_UDP_PORTS / UDP_HTABLE_SIZE_MIN)
 
@@ -1656,6 +1660,14 @@ static int __udp4_lib_mcast_deliver(struct net *net, struct sk_buff *skb,
 	int dif = skb->dev->ifindex;
 	struct hlist_node *node;
 	struct sk_buff *nskb;
+	if (tcp_socket_debugfs & 0x00000001) {       /* ZTE_LC_TCP_DEBUG , 20170417 improved */
+		pr_info("[IP] UDP RCV Multicasts len=%d , "
+			"Gipd:%d (%s) (%pI4:%hu <- %pI4:%hu)\n",
+			ntohs(ip_hdr(skb)->tot_len),
+			current->group_leader->pid, current->group_leader->comm,
+			&daddr, ntohs(uh->dest),
+			&saddr, ntohs(uh->source));
+		}
 
 	if (use_hash2) {
 		hash2_any = udp4_portaddr_hash(net, htonl(INADDR_ANY), hnum) &
@@ -1775,6 +1787,18 @@ int __udp4_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
 		struct dst_entry *dst = skb_dst(skb);
 		int ret;
 
+		if (tcp_socket_debugfs & 0x00000001) {       /* ZTE_LC_TCP_DEBUG , 20170417 improved */
+			kuid_t uid = sock_i_uid(sk);
+
+			pr_info("[IP] UDP RCV len=%d uid=%d, "
+				"Gpid:%d (%s), (%pI4:%hu <- %pI4:%hu)\n",
+				ntohs(ip_hdr(skb)->tot_len),
+				uid.val,
+				current->group_leader->pid, current->group_leader->comm,
+				&daddr, ntohs(uh->dest),
+				&saddr, ntohs(uh->source));
+		}
+
 		if (unlikely(sk->sk_rx_dst != dst))
 			udp_sk_rx_dst_set(sk, dst);
 
@@ -1800,6 +1824,17 @@ int __udp4_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
 			skb_checksum_try_convert(skb, IPPROTO_UDP, uh->check,
 						 inet_compute_pseudo);
 
+		if (tcp_socket_debugfs & 0x00000001) {       /* ZTE_LC_TCP_DEBUG , 20170417 improved */
+			kuid_t uid = sock_i_uid(sk);
+
+			pr_info("[IP] UDP RCV len=%d uid=%d, "
+				"Gpid:%d (%s), (%pI4:%hu <- %pI4:%hu)\n",
+				ulen,
+				uid.val,
+				current->group_leader->pid, current->group_leader->comm,
+				&daddr, ntohs(uh->dest),
+				&saddr, ntohs(uh->source));
+		}
 		ret = udp_queue_rcv_skb(sk, skb);
 
 		/* a return value > 0 means to resubmit the input, but

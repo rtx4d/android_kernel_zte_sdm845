@@ -813,6 +813,13 @@ config QPNP_MISC
 	  and the driver provides an API to check if this interrupt
 	  is available on the current PMIC chip.
 
+config SAFECHIP_VEB_A5
+	tristate "safechip zyitong veb A5"
+	depends on SPI
+	default n
+	help
+	  This driver provides support for safechip zyitong veb A5 devices.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"

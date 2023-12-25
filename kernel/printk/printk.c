@@ -56,6 +56,14 @@
 #include "braille.h"
 #include "internal.h"
 
+/*zte_pm add*/
+#include <linux/rtc.h>
+
+#ifndef CONFIG_TIME_FORMAT_ZTELOG
+#define CONFIG_TIME_FORMAT_ZTELOG 1
+#endif
+/*zte_pm add, end*/
+
 #ifdef CONFIG_EARLY_PRINTK_DIRECT
 extern void printascii(char *);
 #endif
@@ -102,7 +110,7 @@ enum devkmsg_log_masks {
 };
 
 /* Keep both the 'on' and 'off' bits clear, i.e. ratelimit by default: */
-#define DEVKMSG_LOG_MASK_DEFAULT	0
+#define DEVKMSG_LOG_MASK_DEFAULT	1
 
 static unsigned int __read_mostly devkmsg_log = DEVKMSG_LOG_MASK_DEFAULT;
 
@@ -342,6 +350,14 @@ struct printk_log {
 	u8 facility;		/* syslog facility */
 	u8 flags:5;		/* internal record flags */
 	u8 level:3;		/* syslog level */
+	/*zte_pm add*/
+#if defined(CONFIG_TIME_FORMAT_ZTELOG)
+	unsigned int process_id;
+	pid_t pid;
+	char comm[TASK_COMM_LEN];
+	struct timespec ts;
+#endif
+	/*zte_pm end*/
 }
 #ifdef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
 __packed __aligned(4)
@@ -380,8 +396,15 @@ static enum log_flags console_prev;
 static u64 clear_seq;
 static u32 clear_idx;
 
+/*zte_pm add*/
+#if defined(CONFIG_TIME_FORMAT_ZTELOG)
+#define PREFIX_MAX			128
+#define LOG_LINE_MAX		(2048 - PREFIX_MAX)
+#else
 #define PREFIX_MAX		32
 #define LOG_LINE_MAX		(1024 - PREFIX_MAX)
+#endif
+/*zte_pm end*/
 
 #define LOG_LEVEL(v)		((v) & 0x07)
 #define LOG_FACILITY(v)		((v) >> 3 & 0xff)
@@ -582,6 +605,15 @@ static int log_store(int facility, int level,
 		msg->ts_nsec = ts_nsec;
 	else
 		msg->ts_nsec = local_clock();
+	/*zte_pm add*/
+#if defined(CONFIG_TIME_FORMAT_ZTELOG)
+	msg->ts = __current_kernel_time();
+	msg->process_id = smp_processor_id();
+	msg->pid = current->pid;
+	snprintf(msg->comm, 50, "%s", current->comm);
+#endif
+	/*zte_pm end*/
+
 	memset(log_dict(msg) + dict_len, 0, pad_len);
 	msg->len = size;
 
@@ -1175,6 +1207,34 @@ static inline void boot_delay_msec(int level)
 static bool printk_time = IS_ENABLED(CONFIG_PRINTK_TIME);
 module_param_named(time, printk_time, bool, S_IRUGO | S_IWUSR);
 
+/*zte_pm change*/
+#if defined(CONFIG_TIME_FORMAT_ZTELOG)
+static char tmpbuf[1024];
+static size_t print_time(struct timespec ts, char *buf,
+	unsigned int process_id, pid_t pid, const char *comm)
+{
+	struct rtc_time tm;
+	int tlen, info_len;
+
+	if (!printk_time)
+		return 0;
+
+	ts.tv_sec -= 60*sys_tz.tz_minuteswest;
+	if (!buf) {
+		memset(tmpbuf, 0, sizeof(tmpbuf));
+		buf = tmpbuf;
+	}
+
+	rtc_time_to_tm(ts.tv_sec, &tm);
+	tlen = snprintf(buf, 50, "[%02d-%02d %02d:%02d:%02d.%03d] ",
+		tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min,
+		tm.tm_sec, (int)(ts.tv_nsec / NSEC_PER_MSEC));
+
+	info_len = snprintf(buf + tlen, 50, "[%u][%d: %s]",
+			process_id, pid, comm);
+	return tlen + info_len;
+}
+#else
 static size_t print_time(u64 ts, char *buf)
 {
 	unsigned long rem_nsec;
@@ -1190,6 +1250,8 @@ static size_t print_time(u64 ts, char *buf)
 	return sprintf(buf, "[%5lu.%06lu] ",
 		       (unsigned long)ts, rem_nsec / 1000);
 }
+#endif
+/*zte_pm change, end*/
 
 static size_t print_prefix(const struct printk_log *msg, bool syslog, char *buf)
 {
@@ -1210,7 +1272,14 @@ static size_t print_prefix(const struct printk_log *msg, bool syslog, char *buf)
 		}
 	}
 
+	/*zte_pm change*/
+#if defined(CONFIG_TIME_FORMAT_ZTELOG)
+	len += print_time(msg->ts, buf ? buf + len : NULL, msg->process_id, msg->pid, msg->comm);
+#else
 	len += print_time(msg->ts_nsec, buf ? buf + len : NULL);
+#endif
+	/*zte_pm end*/
+
 	return len;
 }
 
@@ -1633,6 +1702,16 @@ static inline void printk_delay(void)
  * reached the console in case of a kernel crash.
  */
 static struct cont {
+
+	/*zte_pm add*/
+#if defined(CONFIG_TIME_FORMAT_ZTELOG)
+	unsigned int process_id;
+	pid_t pid;
+	char comm[TASK_COMM_LEN];
+	struct timespec ts;
+#endif
+	/*zte_pm end*/
+
 	char buf[LOG_LINE_MAX];
 	size_t len;			/* length == 0 means unused buffer */
 	size_t cons;			/* bytes written to console */
@@ -1693,6 +1772,15 @@ static bool cont_add(int facility, int level, enum log_flags flags, const char *
 		cont.flags = flags;
 		cont.cons = 0;
 		cont.flushed = false;
+		/*zte_pm add*/
+#if defined(CONFIG_TIME_FORMAT_ZTELOG)
+		cont.ts = __current_kernel_time();
+		cont.process_id = smp_processor_id();
+		cont.pid = current->pid;
+		snprintf(cont.comm, 50, "%s", current->comm);
+#endif
+		/*zte_pm end*/
+
 	}
 
 	memcpy(cont.buf + cont.len, text, len);
@@ -1717,7 +1805,14 @@ static size_t cont_print_text(char *text, size_t size)
 	size_t len;
 
 	if (cont.cons == 0 && (console_prev & LOG_NEWLINE)) {
+
+		/*zte_pm change*/
+#if defined(CONFIG_TIME_FORMAT_ZTELOG)
+		textlen += print_time(cont.ts, text,  cont.process_id, cont.pid, cont.comm);
+#else
 		textlen += print_time(cont.ts_nsec, text);
+#endif
+		/*zte_pm end*/
 		size -= textlen;
 	}
 
@@ -2134,7 +2229,14 @@ int add_preferred_console(char *name, int idx, char *options)
 	return __add_preferred_console(name, idx, options, NULL);
 }
 
+/*zte_pm change*/
+#if defined(CONFIG_TIME_FORMAT_ZTELOG)
+bool console_suspend_enabled = false;
+#else
 bool console_suspend_enabled = true;
+#endif
+/*zte_pm end*/
+
 EXPORT_SYMBOL(console_suspend_enabled);
 
 static int __init console_suspend_disable(char *str)
@@ -2847,6 +2949,9 @@ static int __init printk_late_init(void)
 		}
 	}
 	hotcpu_notifier(console_cpu_notify, 0);
+	/*zte_pm add*/
+	pr_info("zte log address __log_buf: 0x%p\n", __log_buf);
+	/*zte_pm end*/
 	return 0;
 }
 late_initcall(printk_late_init);

@@ -81,3 +81,9 @@ config PROC_CHILDREN
 
 	  Say Y if you are running any user-space software which takes benefit from
 	  this interface. For example, rkt is such a piece of software.
+
+config ZTE_IMEM_INFO
+	bool "ZTE IMEM INFO"
+	default y
+	help
+	  Say 'y' here to include support for zte imem info.

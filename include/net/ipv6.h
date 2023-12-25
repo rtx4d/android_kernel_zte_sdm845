@@ -1053,4 +1053,7 @@ int ipv6_sock_mc_join(struct sock *sk, int ifindex,
 		      const struct in6_addr *addr);
 int ipv6_sock_mc_drop(struct sock *sk, int ifindex,
 		      const struct in6_addr *addr);
+
+void xt_socket_get6_print(struct sk_buff *skb, int direction);    /*ZTE_LC_TCP_DEBUG, 20170418 improved*/
+extern int tcp_socket_debugfs;
 #endif /* _NET_IPV6_H */

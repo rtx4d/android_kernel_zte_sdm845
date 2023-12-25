@@ -629,6 +629,7 @@ static int pd_send_msg(struct usbpd *pd, u8 msg_type, const u32 *data,
 {
 	int ret;
 	u16 hdr;
+	u8 retry_count = 3;
 
 	if (pd->hard_reset_recvd)
 		return -EBUSY;
@@ -636,9 +637,20 @@ static int pd_send_msg(struct usbpd *pd, u8 msg_type, const u32 *data,
 	hdr = PD_MSG_HDR(msg_type, pd->current_dr, pd->current_pr,
 			pd->tx_msgid, num_data, pd->spec_rev);
 
-	ret = pd_phy_write(hdr, (u8 *)data, num_data * sizeof(u32), sop);
-	if (ret)
-		return ret;
+	/*
+	 * In rare cases, pd_phy_write() get msg_tx_discarded_irq
+	 * and return -EBUSY. Retry it after some delay.
+	 */
+	do {
+		ret = pd_phy_write(hdr, (u8 *)data, num_data * sizeof(u32), sop);
+		if (ret) {
+			pr_warn("%s, %d\n", __func__, ret);
+			if (ret != -EBUSY)
+				return ret;
+			retry_count--;
+			msleep(50);
+		}
+	} while (ret && (retry_count > 0));
 
 	pd->tx_msgid = (pd->tx_msgid + 1) & PD_MAX_MSG_ID;
 	return 0;
@@ -1845,6 +1857,10 @@ static void dr_swap(struct usbpd *pd)
 	} else if (pd->current_dr == DR_UFP) {
 		stop_usb_peripheral(pd);
 		start_usb_host(pd, true);
+		/* Clear ss_lane_svid after enable usb host, as usb host may
+		fail to degrade speed if dp client gets -EBUSY when it tries to
+		release super speed lanes. */
+		pd->ss_lane_svid = 0x0;
 		pd->current_dr = DR_DFP;
 
 		usbpd_send_svdm(pd, USBPD_SID, USBPD_SVDM_DISCOVER_IDENTITY,

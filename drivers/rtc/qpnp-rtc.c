@@ -23,6 +23,8 @@
 #include <linux/platform_device.h>
 #include <linux/spinlock.h>
 #include <linux/alarmtimer.h>
+#include <linux/proc_fs.h>
+#include <soc/qcom/socinfo.h>
 
 /* RTC/ALARM Register offsets */
 #define REG_OFFSET_ALARM_RW	0x40
@@ -48,6 +50,7 @@
 #define TO_SECS(arr)		(arr[0] | (arr[1] << 8) | (arr[2] << 16) | \
 							(arr[3] << 24))
 
+static struct wakeup_source *rtc_alarm_ws = NULL;
 /* Module parameter to control power-on-alarm */
 bool poweron_alarm;
 EXPORT_SYMBOL(poweron_alarm);
@@ -334,6 +337,7 @@ qpnp_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alarm)
 	}
 
 	rtc_dd->alarm_ctrl_reg1 = ctrl_reg;
+	pr_info("ZTE_ALARM_RTC  %lu s later.\n", (secs - secs_rtc));
 
 	dev_dbg(dev, "Alarm Set for h:r:s=%d:%d:%d, d/m/y=%d/%d/%d\n",
 			alarm->time.tm_hour, alarm->time.tm_min,
@@ -350,6 +354,7 @@ qpnp_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alarm)
 	int rc;
 	u8 value[4];
 	unsigned long secs;
+	u8 alarm_ctrl_reg1 = 0;
 	struct qpnp_rtc *rtc_dd = dev_get_drvdata(dev);
 
 	rc = qpnp_read_wrapper(rtc_dd, value,
@@ -373,6 +378,16 @@ qpnp_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alarm)
 		alarm->time.tm_hour, alarm->time.tm_min,
 				alarm->time.tm_sec, alarm->time.tm_mday,
 				alarm->time.tm_mon, alarm->time.tm_year);
+
+	rc = qpnp_read_wrapper(rtc_dd, &alarm_ctrl_reg1,
+				rtc_dd->alarm_base + REG_OFFSET_ALARM_CTRL1, 1);
+	if (rc) {
+		dev_err(dev, "Read from  Alarm control reg failed\n");
+		return rc;
+	}
+	pr_info("alarm_ctrl_reg1=0x%x\n", alarm_ctrl_reg1);
+	if (alarm_ctrl_reg1 & BIT_RTC_ALARM_ENABLE)
+		alarm->enabled = 1;
 
 	return 0;
 }
@@ -437,9 +452,12 @@ static irqreturn_t qpnp_alarm_trigger(int irq, void *dev_id)
 	int rc;
 	unsigned long irq_flags;
 
+	pr_info("qpnp_alarm_trigger\n");
 	rtc_update_irq(rtc_dd->rtc, 1, RTC_IRQF | RTC_AF);
 
 	spin_lock_irqsave(&rtc_dd->alarm_ctrl_lock, irq_flags);
+	if (rtc_alarm_ws != NULL)
+		__pm_wakeup_event(rtc_alarm_ws, 5*MSEC_PER_SEC);
 
 	/* Clear the alarm enable bit */
 	ctrl_reg = rtc_dd->alarm_ctrl_reg1;
@@ -469,6 +487,90 @@ rtc_alarm_handled:
 	return IRQ_HANDLED;
 }
 
+unsigned int reg_alarm;
+int rtc_len;
+#define MSG_BUF_LEN 128
+#define BUF_LEN 64
+static ssize_t rtc_proc_write(struct file *filp,
+		const char *buff, size_t len, loff_t *off)
+{
+	char messages[MSG_BUF_LEN] = {0x0};
+	struct rtc_time tm_alarm = {
+		.tm_sec = 0,
+		.tm_min = 3,
+		.tm_hour = 8,
+		.tm_mday = 1,
+		.tm_mon = 11,
+		.tm_year = 112,
+	};
+	struct rtc_time tm_r;
+	struct rtc_wkalrm alm = {
+		.enabled = 1,
+		.pending = 0,
+		.time = tm_alarm,
+	};
+	struct rtc_device *rtc_dev = alarmtimer_get_rtcdev();
+
+	if (!rtc_dev)
+		return 0;
+
+	if (len > MSG_BUF_LEN)
+		len = MSG_BUF_LEN;
+
+	if (copy_from_user(messages, buff, len))
+		return -EFAULT;
+       /* rtc_set_time(rtc_dev,&tm); */
+	rtc_read_time(rtc_dev, &tm_r);
+	pr_info("rtc_read_time %02d:%02d:%02d %04d-%02d-%02d\n",
+			tm_r.tm_hour, tm_r.tm_min, tm_r.tm_sec,
+			tm_r.tm_year + 1900, tm_r.tm_mon + 1, tm_r.tm_mday);
+	tm_r.tm_min += 2; /* set the alarm 2 min later */
+	alm.time = tm_r;
+	rtc_set_alarm(rtc_dev, &alm);
+
+	return len;
+}
+
+static ssize_t rtc_proc_read(struct file *filp,
+		char __user *buff, size_t len, loff_t *off)
+{
+	char temp_buff[BUF_LEN];
+	ssize_t count;
+	loff_t pos = *off;
+
+	rtc_len = snprintf(temp_buff, BUF_LEN, "%d\n", reg_alarm);
+
+	if (pos >= rtc_len) {
+		pr_info("rtc_proc_read end\n");
+		return 0;
+	}
+
+	count = min(len, (size_t)(rtc_len - pos));
+	if (copy_to_user(buff, temp_buff+pos, count))
+		return -EFAULT;
+
+	*off += count;
+	pr_info("rtc_proc_read reg_alarm =%d rtc_len =%d\n", reg_alarm, rtc_len);
+
+	return count;
+}
+
+static const struct file_operations rtc_proc_ops = {
+	.owner = THIS_MODULE,
+	.write = rtc_proc_write,
+	.read = rtc_proc_read,
+};
+
+static int create_rtc_proc_file(void)
+{
+	struct proc_dir_entry *entry;
+
+	entry = proc_create("driver/rtc_reg_alarm", 0, NULL, &rtc_proc_ops);
+	if (!entry)
+		return -EINVAL;
+	return 0;
+}
+
 static int qpnp_rtc_probe(struct platform_device *pdev)
 {
 	const struct rtc_class_ops *rtc_ops = &qpnp_rtc_ro_ops;
@@ -477,6 +579,8 @@ static int qpnp_rtc_probe(struct platform_device *pdev)
 	struct qpnp_rtc *rtc_dd;
 	unsigned int base;
 	struct device_node *child;
+	u8 value[4];
+
 
 	rtc_dd = devm_kzalloc(&pdev->dev, sizeof(*rtc_dd), GFP_KERNEL);
 	if (rtc_dd == NULL)
@@ -505,6 +609,7 @@ static int qpnp_rtc_probe(struct platform_device *pdev)
 			"Error reading rtc_alarm_powerup property %d\n", rc);
 		return rc;
 	}
+	pr_err("rtc_dd->rtc_alarm_powerup:%d\n", rtc_dd->rtc_alarm_powerup);
 
 	/* Initialise spinlock to protect RTC control register */
 	spin_lock_init(&rtc_dd->alarm_ctrl_lock);
@@ -599,6 +704,9 @@ static int qpnp_rtc_probe(struct platform_device *pdev)
 		goto fail_rtc_enable;
 	}
 
+	/* Init power_on_alarm after adding rtc device */
+	power_on_alarm_init();
+
 	/* Request the alarm IRQ */
 	rc = request_any_context_irq(rtc_dd->rtc_alarm_irq,
 				 qpnp_alarm_trigger, IRQF_TRIGGER_RISING,
@@ -609,8 +717,22 @@ static int qpnp_rtc_probe(struct platform_device *pdev)
 	}
 
 	device_init_wakeup(&pdev->dev, 1);
+	pr_info("ZTE_ALARM_RTC enable_irq_wake: %d\n", rtc_dd->rtc_alarm_irq);
 	enable_irq_wake(rtc_dd->rtc_alarm_irq);
 
+	/* read RTC ALARM register */
+	rc = qpnp_read_wrapper(rtc_dd, value,
+				rtc_dd->alarm_base + REG_OFFSET_ALARM_RW,
+				NUM_8_BIT_RTC_REGS);
+
+	if (rc < 0)
+		dev_err(&pdev->dev, "RTC alarm time read failed\n");
+	reg_alarm = value[0] | (value[1] << 8) | (value[2] << 16) | (value[3] << 24);
+	pr_info("reg_alarm=%d\n", reg_alarm);
+	rtc_alarm_ws = wakeup_source_register("rtc_alarm_irq");
+	if (!rtc_alarm_ws)
+		pr_info("register rtc_alarm_ws failed\n");
+	create_rtc_proc_file();
 	dev_dbg(&pdev->dev, "Probe success !!\n");
 
 	return 0;
@@ -643,6 +765,7 @@ static void qpnp_rtc_shutdown(struct platform_device *pdev)
 	unsigned long irq_flags;
 	struct qpnp_rtc *rtc_dd;
 	bool rtc_alarm_powerup;
+	u8 alarm_ctrl_reg1;
 
 	if (!pdev) {
 		pr_err("qpnp-rtc: spmi device not found\n");
@@ -677,6 +800,27 @@ static void qpnp_rtc_shutdown(struct platform_device *pdev)
 
 fail_alarm_disable:
 		spin_unlock_irqrestore(&rtc_dd->alarm_ctrl_lock, irq_flags);
+	} else {
+		if ((socinfo_get_charger_flag()) && reg_alarm != 0) {
+			value[0] = reg_alarm & 0xFF;
+			value[1] = (reg_alarm >> 8) & 0xFF;
+			value[2] = (reg_alarm >> 16) & 0xFF;
+			value[3] = (reg_alarm >> 24) & 0xFF;
+			rc = qpnp_write_wrapper(rtc_dd, value,
+						rtc_dd->alarm_base + REG_OFFSET_ALARM_RW,
+						NUM_8_BIT_RTC_REGS);
+			if (rc)
+				dev_err(rtc_dd->rtc_dev, "shutdown Write to ALARM reg failed\n");
+			rc = qpnp_read_wrapper(rtc_dd, &alarm_ctrl_reg1,
+				rtc_dd->alarm_base + REG_OFFSET_ALARM_CTRL1, 1);
+			if (rc)
+				dev_err(rtc_dd->rtc_dev, "shutdown Read from  Alarm control reg failed\n");
+			alarm_ctrl_reg1 |= 0x80;
+			rc = qpnp_write_wrapper(rtc_dd, &alarm_ctrl_reg1,
+				rtc_dd->alarm_base + REG_OFFSET_ALARM_CTRL1, 1);
+			if (rc)
+				dev_err(rtc_dd->rtc_dev, "shutdown Write from  Alarm control reg failed\n");
+		}
 	}
 }
 

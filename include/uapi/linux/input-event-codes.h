@@ -336,6 +336,11 @@
 
 #define KEY_MICMUTE		248	/* Mute / unmute the microphone */
 
+/* add start by jiangchong for Hall sensor driver,20141212*/
+#define KEY_HALL_SENSOR_DOWN	249
+#define KEY_HALL_SENSOR_UP	 250
+/* add end by jiangchong for Hall sensor driver,20141212*/
+
 /* Code 255 is reserved for special needs of AT keyboard driver */
 
 #define BTN_MISC		0x100
@@ -641,6 +646,8 @@
  * e.g. teletext or data broadcast application (MHEG, MHP, HbbTV, etc.)
  */
 #define KEY_DATA			0x277
+
+#define KEY_GESTURE_DOUBLEC		0x2a0
 
 #define BTN_TRIGGER_HAPPY		0x2c0
 #define BTN_TRIGGER_HAPPY1		0x2c0

@@ -9,7 +9,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-
+#define DEBUG
 #define pr_fmt(fmt) "SMB1355: %s: " fmt, __func__
 
 #include <linux/device.h>
@@ -150,6 +150,8 @@
 	((mode == POWER_SUPPLY_PL_USBIN_USBIN) \
 	 || (mode == POWER_SUPPLY_PL_USBIN_USBIN_EXT))
 
+#define PARALLEL_ENABLE_VOTER			"PARALLEL_ENABLE_VOTER"
+
 struct smb_chg_param {
 	const char	*name;
 	u16		reg;
@@ -169,21 +171,21 @@ static struct smb_params v1_params = {
 		.name	= "fast charge current",
 		.reg	= FAST_CHARGE_CURRENT_CFG_REG,
 		.min_u	= 0,
-		.max_u	= 6000000,
+		.max_u	= 3000000,
 		.step_u	= 25000,
 	},
 	.ov		= {
 		.name	= "battery over voltage",
 		.reg	= CHGR_BATTOV_CFG_REG,
 		.min_u	= 2450000,
-		.max_u	= 5000000,
+		.max_u	= 4500000,
 		.step_u	= 10000,
 	},
 	.usb_icl	= {
 		.name   = "usb input current limit",
 		.reg    = USBIN_CURRENT_LIMIT_CFG_REG,
 		.min_u  = 100000,
-		.max_u  = 5000000,
+		.max_u  = 2000000,
 		.step_u = 30000,
 	},
 };
@@ -224,6 +226,7 @@ struct smb1355 {
 	bool			exit_die_temp;
 	struct delayed_work	die_temp_work;
 	bool			disabled;
+	struct votable		*irq_disable_votable;
 };
 
 static bool is_secure(struct smb1355 *chip, int addr)
@@ -287,6 +290,8 @@ static int smb1355_set_charge_param(struct smb1355 *chip,
 	int rc;
 	u8 val_raw;
 
+	pr_info("%s: %d [%d, %d]\n",
+		param->name, val_u, param->min_u, param->max_u);
 	if (val_u > param->max_u || val_u < param->min_u) {
 		pr_err("%s: %d is out of range [%d, %d]\n",
 			param->name, val_u, param->min_u, param->max_u);
@@ -375,6 +380,7 @@ static int smb1355_get_prop_input_current_limited(struct smb1355 *chip,
 	if (rc < 0)
 		pr_err("Couldn't read SMB1355_BATTERY_STATUS_3 rc=%d\n", rc);
 
+	pr_info("0x%x =0x%x\n", MISC_RT_STS_REG, stat);
 	pval->intval = !!(stat & HARD_ILIMIT_RT_STS_BIT);
 
 	return 0;
@@ -617,7 +623,7 @@ static int smb1355_parallel_get_prop(struct power_supply *psy,
 	}
 
 	if (rc < 0) {
-		pr_debug("Couldn't get prop %d rc = %d\n", prop, rc);
+		pr_err("Couldn't get prop %d rc = %d\n", prop, rc);
 		return -ENODATA;
 	}
 
@@ -628,6 +634,7 @@ static int smb1355_set_parallel_charging(struct smb1355 *chip, bool disable)
 {
 	int rc;
 
+	pr_info("%s\n", disable ? "disable" : "enable");
 	if (chip->disabled == disable)
 		return 0;
 
@@ -662,6 +669,10 @@ static int smb1355_set_parallel_charging(struct smb1355 *chip, bool disable)
 		schedule_delayed_work(&chip->die_temp_work, 0);
 	}
 
+	if (chip->irq_disable_votable)
+		vote(chip->irq_disable_votable, PARALLEL_ENABLE_VOTER,
+				disable, 0);
+
 	chip->disabled = disable;
 
 	return 0;
@@ -671,6 +682,7 @@ static int smb1355_set_current_max(struct smb1355 *chip, int curr)
 {
 	int rc = 0;
 
+	pr_info("curr is %d\n", curr);
 	if (!IS_USBIN(chip->dt.pl_mode))
 		return 0;
 
@@ -716,7 +728,7 @@ static int smb1355_parallel_set_prop(struct power_supply *psy,
 		power_supply_changed(chip->parallel_psy);
 		break;
 	default:
-		pr_debug("parallel power supply set prop %d not supported\n",
+		pr_err("parallel power supply set prop %d not supported\n",
 			prop);
 		return -EINVAL;
 	}
@@ -1084,6 +1096,7 @@ static int smb1355_request_interrupt(struct smb1355 *chip,
 		return rc;
 	}
 
+	smb1355_irqs[irq_index].irq = irq;
 	if (smb1355_irqs[irq_index].wake)
 		enable_irq_wake(irq);
 
@@ -1111,6 +1124,23 @@ static int smb1355_request_interrupts(struct smb1355 *chip)
 	}
 
 	return rc;
+}
+
+static int smb1355_irq_disable_callback(struct votable *votable, void *data,
+			int disable, const char *client)
+{
+	int i = 0;
+
+	for (i = 0; i < ARRAY_SIZE(smb1355_irqs); i++) {
+		if (smb1355_irqs[i].irq) {
+			if (disable)
+				disable_irq(smb1355_irqs[i].irq);
+			else
+				enable_irq(smb1355_irqs[i].irq);
+		}
+	}
+
+	return 0;
 }
 
 /*********
@@ -1186,6 +1216,15 @@ static int smb1355_probe(struct platform_device *pdev)
 		pr_err("Couldn't request interrupts rc=%d\n", rc);
 		goto cleanup;
 	}
+
+	chip->irq_disable_votable = create_votable("SMB1355_IRQ_DISABLE",
+			VOTE_SET_ANY, smb1355_irq_disable_callback, chip);
+	if (IS_ERR(chip->irq_disable_votable)) {
+		rc = PTR_ERR(chip->irq_disable_votable);
+		goto cleanup;
+	}
+	/* keep IRQ's disabled until parallel is enabled */
+	vote(chip->irq_disable_votable, PARALLEL_ENABLE_VOTER, true, 0);
 
 	pr_info("%s probed successfully pl_mode=%s batfet_mode=%s\n",
 		chip->name,

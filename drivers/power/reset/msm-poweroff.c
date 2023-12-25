@@ -68,6 +68,7 @@ static void __iomem *reduced_sdi_mode_addr;
 #ifdef CONFIG_RANDOMIZE_BASE
 #define KASLR_OFFSET_PROP "qcom,msm-imem-kaslr_offset"
 #endif
+#define SDDUMP_MODE_PROP "qcom,msm-vendor-imem-sd_dump_mode"
 #define REDUCED_SDI_MODE_PROP "qcom,msm-imem-reduced_sdi_mode"
 
 static int in_panic;
@@ -79,6 +80,12 @@ static void *emergency_dload_mode_addr;
 static void *kaslr_imem_addr;
 #endif
 static bool scm_dload_supported;
+
+static void *sd_dump_mode_addr;
+static int ignore_sd_dump = 0;
+
+/* Use Qualcomm's usb vid and pid if enters download due to panic. */
+extern	void use_qualcomm_usb_product_id(void);
 
 static int dload_set(const char *val, struct kernel_param *kp);
 /* interface for exporting attributes */
@@ -98,10 +105,44 @@ struct reset_attribute {
 module_param_call(download_mode, dload_set, param_get_int,
 			&download_mode, 0644);
 
+static int dload_ignore_sd_dump_set(const char *val, struct kernel_param *kp);
+module_param_call(ignore_sd_dump, dload_ignore_sd_dump_set, param_get_int,
+			&ignore_sd_dump, 0644);
+
+static int dload_ignore_sd_dump_set(const char *val, struct kernel_param *kp)
+{
+	int ret;
+	int old_val = ignore_sd_dump;
+
+	pr_err("dload_ignore_sd_dump_set old ignore_sd_dump %d\n", ignore_sd_dump);
+
+	ret = param_set_int(val, kp);
+	pr_err("dload_ignore_sd_dump_set new ignore_sd_dump %d\n", ignore_sd_dump);
+
+	if (ret)
+		return ret;
+
+	/* If ignor_sd_dump is not zero or one, ignore. */
+	if (ignore_sd_dump >> 1) {
+		ignore_sd_dump = old_val;
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+void msm_ignore_sd_dump(int enable)
+{
+	ignore_sd_dump = !!enable;
+}
+EXPORT_SYMBOL(msm_ignore_sd_dump);
+
 static int panic_prep_restart(struct notifier_block *this,
 			      unsigned long event, void *ptr)
 {
 	in_panic = 1;
+	/* Use Qualcomm's usb vid and pid if enters download due to panic. */
+	use_qualcomm_usb_product_id();
 	return NOTIFY_DONE;
 }
 
@@ -141,6 +182,8 @@ static void set_dload_mode(int on)
 		__raw_writel(on ? 0xCE14091A : 0,
 		       dload_mode_addr + sizeof(unsigned int));
 		/* Make sure the download cookie is updated */
+		if (sd_dump_mode_addr)
+			__raw_writel((on && !ignore_sd_dump) ? 0x20121221 : 0, sd_dump_mode_addr);
 		mb();
 	}
 
@@ -149,6 +192,9 @@ static void set_dload_mode(int on)
 		pr_err("Failed to set secure DLOAD mode: %d\n", ret);
 
 	dload_mode_enabled = on;
+	/* zte add kernel log below */
+	pr_notice("zte_restart set_dload_mode %d, param=%d\n",
+		dload_mode_enabled, on);
 }
 
 static bool get_dload_mode(void)
@@ -267,16 +313,23 @@ static void msm_restart_prepare(const char *cmd)
 			((cmd != NULL && cmd[0] != '\0') &&
 			!strcmp(cmd, "edl")))
 			need_warm_reset = true;
+		if ((cmd != NULL && cmd[0] != '\0') &&
+			!strcmp(cmd, "LONGPRESS"))
+			need_warm_reset = download_mode ? true : false;
 	} else {
 		need_warm_reset = (get_dload_mode() ||
 				(cmd != NULL && cmd[0] != '\0'));
 	}
 
 	/* Hard reset the PMIC unless memory contents must be maintained. */
-	if (need_warm_reset)
+	if (need_warm_reset) {
+	/* zte add reset type print to assist reset issue's analysis */
+		pr_notice("zte_restart flag %d, %d, %d\n",
+			in_panic, download_mode, restart_mode);
 		qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
-	else
+	} else {
 		qpnp_pon_system_pwr_off(PON_POWER_OFF_HARD_RESET);
+	}
 
 	if (cmd != NULL) {
 		if (!strncmp(cmd, "bootloader", 10)) {
@@ -287,6 +340,10 @@ static void msm_restart_prepare(const char *cmd)
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_RECOVERY);
 			__raw_writel(0x77665502, restart_reason);
+		} else if (!strcmp(cmd, "ftmmode")) {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_FTMMODE);
+			__raw_writel(0x776655ee, restart_reason);
 		} else if (!strcmp(cmd, "rtc")) {
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_RTC);
@@ -645,6 +702,15 @@ static int msm_restart_probe(struct platform_device *pdev)
 			pr_err("unable to map imem EDLOAD mode offset\n");
 	}
 
+	/* Add by ruijiagui, map sddump flag address */
+	np = of_find_compatible_node(NULL, NULL, SDDUMP_MODE_PROP);
+	if (!np) {
+		pr_err("unable to find DT imem sd dump mode node\n");
+	} else {
+		sd_dump_mode_addr = of_iomap(np, 0);
+		if (!sd_dump_mode_addr)
+			pr_err("unable to map imem sddump mode offset\n");
+	}
 #ifdef CONFIG_RANDOMIZE_BASE
 #define KASLR_OFFSET_BIT_MASK	0x00000000FFFFFFFF
 	np = of_find_compatible_node(NULL, NULL, KASLR_OFFSET_PROP);
@@ -743,6 +809,7 @@ err_restart_reason:
 #ifdef CONFIG_QCOM_DLOAD_MODE
 	iounmap(emergency_dload_mode_addr);
 	iounmap(dload_mode_addr);
+	iounmap(sd_dump_mode_addr);
 #endif
 	return ret;
 }
