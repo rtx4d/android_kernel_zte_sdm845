@@ -293,6 +293,18 @@ endmenu
 
 menu "Kernel Features"
 
+#
+# Added for ZTE board configuration by ZTE_BOOT
+#
+menu "ZTE Board Selection"
+config BOARD_AKERSHUS
+	depends on ARCH_SDM845
+	bool "ZTE AKERSHUS"
+	help
+	  Support for ZTE SDM845 Akershus device.
+
+endmenu
+
 menu "ARM errata workarounds via the alternatives framework"
 
 config ARM64_ERRATUM_826319

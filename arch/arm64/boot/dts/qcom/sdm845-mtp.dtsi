@@ -13,8 +13,7 @@
 #include <dt-bindings/gpio/gpio.h>
 #include "sdm845-pmic-overlay.dtsi"
 #include "sdm845-pinctrl-overlay.dtsi"
-//#include "sdm845-camera-sensor-mtp.dtsi"
-#include NUBIA_CAMERA_OVERWRITE_DTSI_FILE
+
 &qupv3_se10_i2c {
 #include "smb1355.dtsi"
 };
@@ -84,6 +83,23 @@
 	};
 };
 
+&qupv3_se10_i2c {
+	status = "ok";
+		sx9310-input@28 {
+			compatible = "zte, sx9310-input";
+			reg = <0x28>;
+			//cc,irq_gpio = <&tlmm 17 0x0>;
+			interrupt-parent = <&tlmm>;
+			interrupts = <123 2>;
+			interrupt-names = "sx9310_irq";
+			pinctrl-names = "sx9310_active", "sx9310_sleep";
+			pinctrl-0 = <&sx9500_int_active>;
+			pinctrl-1 = <&sx9500_int_suspend >;
+			vdd-supply = <&pm8998_l19>;
+			svdd-supply = <&pm8998_s4>;
+		};
+};
+
 &labibb {
 	status = "ok";
 	qcom,qpnp-labibb-mode = "lcd";
@@ -95,7 +111,7 @@
 	qcom,mdss-dsi-bl-min-level = <1>;
 	qcom,mdss-dsi-bl-max-level = <4095>;
 	qcom,mdss-dsi-mode-sel-gpio-state = "dual_port";
-	//qcom,panel-mode-gpio = <&tlmm 52 0>;
+	qcom,panel-mode-gpio = <&tlmm 52 0>;
 	qcom,platform-reset-gpio = <&tlmm 6 0>;
 };
 
@@ -105,7 +121,7 @@
 	qcom,mdss-dsi-bl-min-level = <1>;
 	qcom,mdss-dsi-bl-max-level = <4095>;
 	qcom,mdss-dsi-mode-sel-gpio-state = "dual_port";
-       //qcom,panel-mode-gpio = <&tlmm 52 0>;
+	qcom,panel-mode-gpio = <&tlmm 52 0>;
 	qcom,platform-reset-gpio = <&tlmm 6 0>;
 	qcom,platform-te-gpio = <&tlmm 10 0>;
 };
@@ -116,7 +132,7 @@
 	qcom,mdss-dsi-bl-min-level = <1>;
 	qcom,mdss-dsi-bl-max-level = <4095>;
 	qcom,mdss-dsi-mode-sel-gpio-state = "single_port";
-	//qcom,panel-mode-gpio = <&tlmm 52 0>;
+	qcom,panel-mode-gpio = <&tlmm 52 0>;
 	qcom,platform-reset-gpio = <&tlmm 6 0>;
 };
 
@@ -126,7 +142,7 @@
 	qcom,mdss-dsi-bl-min-level = <1>;
 	qcom,mdss-dsi-bl-max-level = <4095>;
 	qcom,mdss-dsi-mode-sel-gpio-state = "single_port";
-	//qcom,panel-mode-gpio = <&tlmm 52 0>;
+	qcom,panel-mode-gpio = <&tlmm 52 0>;
 	qcom,platform-reset-gpio = <&tlmm 6 0>;
 	qcom,platform-te-gpio = <&tlmm 10 0>;
 };
@@ -188,8 +204,37 @@
 	qcom,platform-te-gpio = <&tlmm 10 0>;
 };
 
-&dsi_nt35597_truly_dsc_cmd_display {
-	qcom,dsi-display-active;
+&dsi_samsung_1080p_cmd {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_vdd_no_labibb>;
+	qcom,mdss-dsi-mode-sel-gpio-state = "single_port";
+	qcom,5v-boost-gpio = <&tlmm 40 0>;
+	qcom,platform-reset-gpio = <&tlmm 6 0>;
+	qcom,platform-te-gpio = <&tlmm 10 0>;
+	qcom,dsp-reset-gpio = <&tlmm 23 0>;
+	qcom,dsp-dsp_1v1 = <&tlmm 26 0>;
+	qcom,dsp-wakeup-gpio = <&tlmm 24 0>;
+};
+
+&dsi_samsung_1080p_video_nolcd {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_vdd_no_labibb>;
+	qcom,mdss-dsi-mode-sel-gpio-state = "single_port";
+	qcom,5v-boost-gpio = <&tlmm 40 0>;
+	qcom,platform-reset-gpio = <&tlmm 6 0>;
+	qcom,platform-te-gpio = <&tlmm 10 0>;
+	qcom,dsp-reset-gpio = <&tlmm 23 0>;
+	qcom,dsp-dsp_1v1 = <&tlmm 26 0>;
+	qcom,dsp-wakeup-gpio = <&tlmm 24 0>;
+};
+
+&dsi_rm69299_amoled_fhd_cmd {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_vdd_no_labibb>;
+	qcom,mdss-dsi-mode-sel-gpio-state = "single_port";
+	qcom,5v-boost-gpio = <&tlmm 40 0>;
+	qcom,platform-reset-gpio = <&tlmm 6 0>;
+	qcom,platform-te-gpio = <&tlmm 10 0>;
+	qcom,dsp-reset-gpio = <&tlmm 23 0>;
+	qcom,dsp-dsp_1v1 = <&tlmm 26 0>;
+	qcom,dsp-wakeup-gpio = <&tlmm 24 0>;
 };
 
 &pmi8998_wled {
@@ -330,23 +375,6 @@
 			     &nfc_clk_default>;
 		pinctrl-1 = <&nfc_int_suspend &nfc_enable_suspend>;
 	};
-/*
-	tfa98xx@34 {
-        status = "ok";
-        compatible = "nxp,tfa98xx";
-        reg =<0x34>;
-        reset-gpio = <&tlmm 23 0x00>;
-        irq-gpio = <&tlmm 129 0x00>;
-    };
-    
-    tfa98xx@35 {
-	    status = "ok";
-	    compatible = "nxp,tfa98xx";
-	    reg =<0x35>;
-	    reset-gpio = <&tlmm 24 0x00>;
-	    irq-gpio = <&tlmm 128 0x00>;
-    };
-*/
 };
 
 &qupv3_se10_i2c {
@@ -501,12 +529,6 @@
 			active-config0 {
 				temperature = <125000>;
 				hysteresis = <10000>;
-				type = "passive";
-			};
-
-			thermal-hal-cfg {
-				temperature = <115000>;
-				hysteresis = <5000>;
 				type = "passive";
 			};
 		};
