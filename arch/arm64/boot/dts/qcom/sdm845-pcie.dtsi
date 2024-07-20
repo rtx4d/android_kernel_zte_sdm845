@@ -270,7 +270,7 @@
 	};
 
 	pcie1: qcom,pcie@0x1c08000 {
-		compatible = "qcom,pci-msm";
+		compatible = "qcom,pci-msm_backup";
 		cell-index = <1>;
 
 		reg = <0x1c08000 0x2000>,

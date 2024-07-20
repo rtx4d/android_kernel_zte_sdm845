@@ -11,11 +11,19 @@
  */
 
 qcom,demo_6000mah {
-	qcom,max-voltage-uv = <4350000>;
-	qcom,fg-cc-cv-threshold-mv = <4340>;
-	qcom,fastchg-current-ma = <6000>;
-	qcom,batt-id-kohm = <75>;
-	qcom,battery-beta = <3435>;
+	qcom,max-voltage-uv = <4450000>;
+	qcom,fg-cc-cv-threshold-mv = <4440>;
+	qcom,fastchg-current-ma = <3000>;
+	qcom,batt-id-kohm = <20>;
+	qcom,battery-beta = <4050>;
+	qcom,jeita-fcc-ranges = <0   50   375000
+				 51 100  1150000
+				 101 450  3000000
+				 451 550  1350000>;
+	qcom,jeita-fv-ranges =  <0   50  4450000
+				 51 100  4450000
+				 101 450  4450000
+				 451 550  4100000>;
 	qcom,battery-type = "Demo_battery_6000mah";
 	qcom,fg-profile-data = [
 		 2C 1F 3F FC
