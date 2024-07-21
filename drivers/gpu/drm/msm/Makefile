@@ -145,6 +145,10 @@ msm_drm-$(CONFIG_DRM_MSM_DSI_STAGING) += dsi-staging/dsi_iris2p_lightup.o \
                                 dsi-staging/dsi_iris2p_i2c.o
 endif
 
+ifeq ($(CONFIG_ZTE_LCD_COMMON_FUNCTION), y)
+msm_drm-$(CONFIG_DRM_MSM_DSI_STAGING) += dsi-staging/zte_lcd_common.o
+endif
+
 msm_drm-$(CONFIG_DRM_MSM_DSI_PLL) += dsi/pll/dsi_pll.o \
 				dsi/pll/dsi_pll_28nm.o
 
