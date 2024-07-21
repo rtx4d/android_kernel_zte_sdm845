@@ -22,6 +22,9 @@
 
 #include "dsi_panel.h"
 #include "dsi_ctrl_hw.h"
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+#include "dsi_iris2p_api.h"
+#endif
 
 /**
  * topology is currently defined by a set of following 3 values:
@@ -445,6 +448,17 @@ static int dsi_panel_gpio_release(struct dsi_panel *panel)
 	if (gpio_is_valid(panel->reset_config.lcd_mode_sel_gpio))
 		gpio_free(panel->reset_config.lcd_mode_sel_gpio);
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	if (gpio_is_valid(panel->dsp_cfg.dsp_1v1))
+		gpio_free(panel->dsp_cfg.dsp_1v1);
+
+	if (gpio_is_valid(panel->dsp_cfg.dsp_reset_gpio))
+		gpio_free(panel->dsp_cfg.dsp_reset_gpio);
+
+	if (gpio_is_valid(panel->dsp_cfg.dsp_wakeup))
+		gpio_free(panel->dsp_cfg.dsp_wakeup);
+
+#endif
 	return rc;
 }
 
@@ -550,6 +564,169 @@ static int dsi_panel_set_pinctrl_state(struct dsi_panel *panel, bool enable)
 
 	return rc;
 }
+
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+#define USE_EXTERNAL_CLOCK
+static bool iris_clk3_prepared = false;
+
+static int dsi_dsp_power_on(struct dsi_panel *panel)
+{
+	int rc = 0;
+
+	pr_info("[MSM_LCD] dsi_iris_power_on\n");
+#if defined(USE_EXTERNAL_CLOCK)
+	if (panel->dsp_cfg.div_clk3 != NULL){
+		rc = clk_prepare_enable(panel->dsp_cfg.div_clk3);
+		if (rc) {
+			pr_err("Unable to enable div_clk3\n");
+		} else {
+			iris_clk3_prepared = true;
+			usleep_range(10*1000, 10*1000);/*wait stable clock*/
+			pr_err("dsi_iris_power_on: clk enabled: use external div_clk3\n");
+		}
+	} else {
+		pr_err("dsi_iris_power_on: external div_clk3 invalid\n");
+	}
+#else
+	pr_info("[MSM_LCD] dsi_iris_power_on: clk: xtal\n");
+#endif
+
+	if (gpio_is_valid(panel->dsp_cfg.dsp_1v1)) {
+		rc = gpio_direction_output(panel->dsp_cfg.dsp_1v1, 1);
+		if (rc) {
+			pr_err("unable to set dir for disp gpio rc=%d\n", rc);
+			goto exit;
+		}
+	} else {
+		pr_err("dsi_iris_power_on: fatal 1.1v invalid.\n");
+	}
+
+	pr_info("[MSM_LCD] dsi_iris_power_on: 1.1v enabled. resetting iris ...\n");
+
+	if (gpio_is_valid(panel->dsp_cfg.dsp_reset_gpio)) {
+		rc = gpio_direction_output(panel->dsp_cfg.dsp_reset_gpio, 0);
+		if (rc) {
+			pr_err("unable to set dsp_reset_gpio rc=%d\n", rc);
+			goto exit;
+		}
+		usleep_range(10*1000, 10*1000);
+		rc = gpio_direction_output(panel->dsp_cfg.dsp_reset_gpio, 1);
+		if (rc) {
+			pr_err("unable to set dsp_reset_gpio rc=%d\n", rc);
+			goto exit;
+		}
+		usleep_range(10*1000, 10*1000);
+	} else {
+		pr_err("dsi_iris_power_on: fatal dsp_reset_gpio invalid.\n");
+	}
+
+exit:
+	pr_debug("dsi_iris_power_on end\n");
+	return rc;
+}
+
+static int dsi_dsp_power_off(struct dsi_panel *panel)
+{
+	int rc = 0;
+
+	pr_info("[MSM_LCD] dsi_iris_power_off\n");
+	if (gpio_is_valid(panel->dsp_cfg.dsp_1v1)) {
+		rc = gpio_direction_output(panel->dsp_cfg.dsp_1v1, 0);
+		if (rc) {
+			pr_err("unable to set dir for disp gpio rc=%d\n", rc);
+			goto exit;
+		}
+	}
+#if defined(USE_EXTERNAL_CLOCK)
+	if (panel->dsp_cfg.div_clk3 != NULL
+		&& iris_clk3_prepared){
+		iris_clk3_prepared = false;
+		clk_disable_unprepare(panel->dsp_cfg.div_clk3);
+	}
+#endif
+exit:
+	return rc;
+}
+
+static int pt_power_enable = 0;
+int dsi_dsp_pt_power(struct dsi_panel *panel, bool enable)
+{
+	int rc = 0, i = 0;
+	struct dsi_vreg *vreg;
+	int num_of_v = 0;
+
+	for (i = 0; i < panel->power_info.count; i++) {
+		vreg = &panel->power_info.vregs[i];
+		if (!strcmp(vreg->vreg_name, "vddio")) {
+			break;
+		}
+	}
+	if (i == panel->power_info.count) {
+		pr_err("dsp no find vddio\n");
+		rc = -1;
+		goto exit;
+	}
+	if (enable) {
+		if (1 == pt_power_enable) {
+			pr_info("[MSM_LCD] vddio has already power on");
+			goto exit;
+		}
+		/* vddio power-up */
+		pr_info("[MSM_LCD] vddio enable");
+		rc = regulator_set_load(vreg->vreg,
+						   vreg->enable_load);
+		if (rc) {
+		   pr_err("regulator_set_load fail\n");
+		}
+		num_of_v = regulator_count_voltages(vreg->vreg);
+		if (num_of_v > 0) {
+		   rc = regulator_set_voltage(vreg->vreg,
+						  vreg->min_voltage,
+						  vreg->max_voltage);
+		   if (rc) {
+			   pr_err("Set voltage(%s) fail, rc=%d\n",
+					vreg->vreg_name, rc);
+		   }
+		}
+
+		rc = regulator_enable(vreg->vreg);
+		if (rc) {
+		   pr_err("regulator_enable fail\n");
+		}
+
+		if (gpio_is_valid(panel->dsp_cfg.dsp_1v1)) {
+		   rc = gpio_direction_output(panel->dsp_cfg.dsp_1v1, 1);
+		   if (rc) {
+			   pr_err("unable to set dir for disp gpio rc=%d\n", rc);
+			   goto exit;
+		   }
+		}
+		pt_power_enable = 1;
+	} else {
+		/*  power-off */
+		if (0 == pt_power_enable) {
+			pr_info("[MSM_LCD] vddio has already vddio disable");
+			goto exit;
+		}
+		pr_info("[MSM_LCD] vddio disable");
+		regulator_set_load(vreg->vreg,
+					vreg->disable_load);
+		regulator_disable(vreg->vreg);
+
+		if (gpio_is_valid(panel->dsp_cfg.dsp_1v1)) {
+			rc = gpio_direction_output(panel->dsp_cfg.dsp_1v1, 0);
+			if (rc) {
+				pr_err("unable to set dir for disp gpio rc=%d\n", rc);
+				goto exit;
+			}
+		}
+		pt_power_enable = 0;
+	}
+
+exit:
+	return rc;
+}
+#endif
 
 static int dsi_panel_exd_enable(struct dsi_panel *panel)
 {
@@ -666,6 +843,13 @@ static int dsi_panel_power_on(struct dsi_panel *panel)
 		goto exit;
 	}
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	rc = dsi_dsp_power_on(panel);
+	if (rc) {
+		pr_err("[%s] failed to dsi_dsp_power_on, rc=%d\n", panel->name, rc);
+	}
+#endif
+
 	rc = dsi_panel_set_pinctrl_state(panel, true);
 	if (rc) {
 		pr_err("[%s] failed to set pinctrl, rc=%d\n", panel->name, rc);
@@ -717,10 +901,24 @@ static int dsi_panel_power_off(struct dsi_panel *panel)
 		       rc);
 	}
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	if (gpio_is_valid(panel->dsp_cfg.dsp_reset_gpio)) {
+		rc = gpio_direction_output(panel->dsp_cfg.dsp_reset_gpio, 0);
+		if (rc) {
+			pr_err("unable to set dir for disp gpio rc=%d\n", rc);
+		}
+	}
+#endif
+
 	rc = dsi_pwr_enable_regulator(&panel->power_info, false);
 	if (rc)
 		pr_err("[%s] failed to enable vregs, rc=%d\n", panel->name, rc);
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	rc = dsi_dsp_power_off(panel);
+	if (rc)
+		pr_err("[%s] failed to dsi_dsp_power_off, rc=%d\n", panel->name, rc);
+#endif
 	return rc;
 }
 static int dsi_panel_tx_cmd_set(struct dsi_panel *panel,
@@ -746,6 +944,12 @@ static int dsi_panel_tx_cmd_set(struct dsi_panel *panel,
 	count = mode->priv_info->cmd_sets[type].count;
 	state = mode->priv_info->cmd_sets[type].state;
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	if (irisIsAllowedDsiTrace())
+		pr_info("dsi_panel_tx_cmd_set: cmd type %d, count %d, state %d\n",
+			(int)type, (int)count, (int)state);
+#endif
+
 	if (count == 0) {
 		pr_debug("[%s] No commands to be sent for state(%d)\n",
 			 panel->name, type);
@@ -758,6 +962,12 @@ static int dsi_panel_tx_cmd_set(struct dsi_panel *panel,
 
 		if (cmds->last_command)
 			cmds->msg.flags |= MIPI_DSI_MSG_LASTCOMMAND;
+
+		#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+		if (irisIsAllowedDsiTrace())
+			pr_info("dsi_panel_tx_cmd_set: [%d]msg tx length %d, msg rx length %d\n",
+				i, (int)(cmds->msg.tx_len), (int)(cmds->msg.rx_len));
+		#endif
 
 		len = ops->transfer(panel->host, &cmds->msg);
 		if (len < 0) {
@@ -870,7 +1080,13 @@ static int dsi_panel_update_backlight(struct dsi_panel *panel,
 
 	dsi = &panel->mipi_device;
 
+/*add by yujianhua for lcd param zte*/
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	rc = iris_handover_dcs_set_display_brightness(panel, bl_lvl, DSI_CMD_SET_STATE_LP);
+#else
 	rc = mipi_dsi_dcs_set_display_brightness(dsi, bl_lvl);
+#endif
+/*add by yujianhua for lcd param zte end*/
 	if (rc < 0)
 		pr_err("failed to update dcs backlight:%d\n", bl_lvl);
 
@@ -2079,6 +2295,49 @@ error:
 	return rc;
 }
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+static int dsi_panel_parse_dsp_gpios(struct dsi_panel *panel,
+				 struct device_node *of_node)
+{
+	int rc = 0;
+
+	panel->dsp_cfg.dsp_reset_gpio = of_get_named_gpio(of_node,
+					      "qcom,dsp-reset-gpio",
+					      0);
+	if (!gpio_is_valid(panel->dsp_cfg.dsp_reset_gpio)) {
+		pr_err("[%s] failed get dsp reset gpio, rc=%d\n", panel->name, rc);
+		rc = -EINVAL;
+		goto error;
+	}
+
+	panel->dsp_cfg.dsp_1v1 = of_get_named_gpio(of_node,
+						  "qcom,dsp-dsp_1v1",
+						  0);
+	if (!gpio_is_valid(panel->dsp_cfg.dsp_1v1)) {
+		pr_err("[%s] failed get dsp 1v1 power, rc=%d\n", panel->name, rc);
+		rc = -EINVAL;
+		goto error;
+	}
+
+	panel->dsp_cfg.dsp_wakeup = of_get_named_gpio(of_node,
+						"qcom,dsp-wakeup-gpio",
+						0);
+	if (!gpio_is_valid(panel->dsp_cfg.dsp_wakeup)) {
+		pr_err("[%s] failed get dsp wakeup gpio, rc=%d\n", panel->name, rc);
+	}
+
+	panel->dsp_cfg.dsp_gpio_test = of_get_named_gpio(of_node,
+						"qcom,dsp-test-gpio",
+						0);
+	if (!gpio_is_valid(panel->dsp_cfg.dsp_gpio_test)) {
+		pr_err("[%s] failed get dsp test gpio, rc=%d\n", panel->name, rc);
+	}
+
+error:
+	return rc;
+}
+#endif
+
 static int dsi_panel_exd_parse_gpios(struct dsi_panel *panel,
 				 struct device_node *of_node)
 {
@@ -3240,6 +3499,11 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 		if (rc)
 			pr_err("failed to parse panel gpios, rc=%d\n", rc);
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	rc = dsi_panel_parse_dsp_gpios(panel, of_node);
+	if (rc)
+		pr_err("failed to parse dsp_gpios, rc=%d\n", rc);
+#endif
 		rc = dsi_panel_parse_bl_config(panel, of_node);
 		if (rc)
 			pr_err("failed to parse backlight config, rc=%d\n", rc);
@@ -3266,6 +3530,17 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 		rc = dsi_panel_parse_esd_config(panel, of_node);
 		if (rc)
 			pr_debug("failed to parse esd config, rc=%d\n", rc);
+
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	panel->dsp_cfg.div_clk3 = devm_clk_get(parent, "div_clk3");
+	if (IS_ERR(panel->dsp_cfg.div_clk3)) {
+		pr_err("%s:Unable to get div_clk3\n", __func__);
+		panel->dsp_cfg.div_clk3 = NULL;
+	} else {
+		pr_info("[MSM_LCD] %s:iris get div_clk3 ok\n", __func__);
+	}
+	iris_info_init(panel);
+#endif
 
 		panel->type = DSI_PANEL;
 	} else if (type == EXT_BRIDGE) {
@@ -3988,13 +4263,21 @@ int dsi_panel_enable(struct dsi_panel *panel)
 		return 0;
 
 	mutex_lock(&panel->panel_lock);
-
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	iris_pre_lightup(panel);
+#endif
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_ON);
 	if (rc) {
 		pr_err("[%s] failed to send DSI_CMD_SET_ON cmds, rc=%d\n",
 		       panel->name, rc);
 	}
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	iris_lightup(panel);
+#endif
 	panel->panel_initialized = true;
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	iris_work_enable(true);
+#endif
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }
@@ -4063,15 +4346,15 @@ int dsi_panel_disable(struct dsi_panel *panel)
 		return 0;
 
 	mutex_lock(&panel->panel_lock);
-
-	/* Avoid sending panel off commands when ESD recovery is underway */
-	if (!atomic_read(&panel->esd_recovery_pending)) {
-		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_OFF);
-		if (rc) {
-			pr_err("[%s] failed to send DSI_CMD_SET_OFF cmds, rc=%d\n",
-					panel->name, rc);
-			goto error;
-		}
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	iris_lightdown(panel);
+	iris_work_enable(false);
+#endif
+	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_OFF);
+	if (rc) {
+		pr_err("[%s] failed to send DSI_CMD_SET_OFF cmds, rc=%d\n",
+		       panel->name, rc);
+		goto error;
 	}
 	panel->panel_initialized = false;
 

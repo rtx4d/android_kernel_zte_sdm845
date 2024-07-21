@@ -164,6 +164,16 @@ struct dsi_panel_exd_config {
 	int selab;
 };
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+struct dsp_config{
+	int dsp_reset_gpio;
+	int dsp_1v1;
+	int dsp_wakeup;
+	int dsp_gpio_test;
+	struct clk *div_clk3;
+};
+#endif
+
 struct dsi_panel {
 	const char *name;
 	enum dsi_panel_type type;
@@ -206,7 +216,9 @@ struct dsi_panel {
 	enum dsi_dms_mode dms_mode;
 
 	bool sync_broadcast_en;
-
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	struct dsp_config dsp_cfg;
+#endif
 	struct dsi_panel_exd_config exd_config;
 };
 
@@ -299,6 +311,11 @@ int dsi_panel_switch(struct dsi_panel *panel);
 int dsi_panel_post_switch(struct dsi_panel *panel);
 
 void dsi_dsc_pclk_param_calc(struct msm_display_dsc_info *dsc, int intf_width);
+
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+int dsi_dsp_pt_power(struct dsi_panel *panel, bool enable);
+int iris_work_enable(bool enable);
+#endif
 
 struct dsi_panel *dsi_panel_ext_bridge_get(struct device *parent,
 				struct device_node *of_node,
