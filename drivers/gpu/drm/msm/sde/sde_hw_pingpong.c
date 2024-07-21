@@ -41,9 +41,15 @@
 #define PP_DCE_DATA_OUT_SWAP            0x0c8
 
 #define DITHER_DEPTH_MAP_INDEX 9
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+static u32 dither_depth_map[DITHER_DEPTH_MAP_INDEX] = {
+	0, 0, 0, 0, 0, 1, 2, 3, 2
+};
+#else
 static u32 dither_depth_map[DITHER_DEPTH_MAP_INDEX] = {
 	0, 0, 0, 0, 0, 1, 2, 3, 3
 };
+#endif
 
 static struct sde_pingpong_cfg *_pingpong_offset(enum sde_pingpong pp,
 		struct sde_mdss_cfg *m,

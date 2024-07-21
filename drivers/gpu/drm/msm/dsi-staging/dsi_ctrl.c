@@ -961,6 +961,10 @@ static int dsi_ctrl_copy_and_pad_cmd(struct dsi_ctrl *dsi_ctrl,
 	    (cmd_type == MIPI_DSI_GENERIC_READ_REQUEST_2_PARAM))
 		buf[3] |= BIT(5);
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	if ((buf[2] & 0x3f) == MIPI_DSI_GENERIC_READ_REQUEST_1_PARAM)
+		buf[3] |= BIT(5);
+#endif
 	*buffer = buf;
 	*size = len;
 
@@ -1626,7 +1630,11 @@ int dsi_ctrl_buffer_init(struct dsi_ctrl *dsi_ctrl)
 	}
 
 	dsi_ctrl->tx_cmd_buf = msm_gem_new(dsi_ctrl->drm_dev,
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+					   SZ_512K,
+#else
 					   SZ_4K,
+#endif
 					   MSM_BO_UNCACHED);
 
 	if (IS_ERR(dsi_ctrl->tx_cmd_buf)) {
@@ -1636,7 +1644,11 @@ int dsi_ctrl_buffer_init(struct dsi_ctrl *dsi_ctrl)
 		goto error;
 	}
 
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	dsi_ctrl->cmd_buffer_size = SZ_512K;
+#else
 	dsi_ctrl->cmd_buffer_size = SZ_4K;
+#endif
 
 	rc = msm_gem_get_iova(dsi_ctrl->tx_cmd_buf, aspace, &iova);
 	if (rc) {

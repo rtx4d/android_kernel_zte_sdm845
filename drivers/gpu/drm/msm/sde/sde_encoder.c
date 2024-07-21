@@ -38,6 +38,9 @@
 #include "sde_crtc.h"
 #include "sde_trace.h"
 #include "sde_core_irq.h"
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+#include "../dsi-staging/dsi_iris2p_api.h"
+#endif
 
 #define SDE_DEBUG_ENC(e, fmt, ...) SDE_DEBUG("enc%d " fmt,\
 		(e) ? (e)->base.base.id : -1, ##__VA_ARGS__)
@@ -4143,6 +4146,9 @@ int sde_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc,
 	unsigned int i;
 	int rc, ret = 0;
 	int mode_is_yuv = 0;
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	int vsync_count = 0;
+#endif
 
 	if (!drm_enc || !params || !drm_enc->dev ||
 		!drm_enc->dev->dev_private) {
@@ -4178,6 +4184,12 @@ int sde_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc,
 			if (phys->enable_state == SDE_ENC_ERR_NEEDS_HW_RESET)
 				needs_hw_reset = true;
 			_sde_encoder_setup_dither(phys);
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+			if (phys->intf_mode == INTF_MODE_CMD
+				&& vsync_count == 0) {
+				vsync_count = atomic_read(&phys->vsync_cnt);
+			}
+#endif
 		}
 	}
 	SDE_ATRACE_END("enc_prepare_for_kickoff");
@@ -4208,7 +4220,11 @@ int sde_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc,
 	}
 
 	_sde_encoder_update_master(drm_enc, params);
-
+	
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+	irisReportTeCount(vsync_count);
+	iris_cmd_kickoff_proc();
+#endif
 	_sde_encoder_update_roi(drm_enc);
 
 	if (sde_enc->cur_master && sde_enc->cur_master->connector) {
@@ -5231,6 +5247,68 @@ int sde_encoder_update_caps_for_cont_splash(struct drm_encoder *encoder)
 
 	return ret;
 }
+
+#if defined(CONFIG_IRIS2P_FULL_SUPPORT)
+int sde_encoder_wait_idle(struct drm_encoder *drm_enc)
+{
+	int i = 0;
+	int rc, ret = 0;
+	struct sde_encoder_virt *sde_enc;
+	struct sde_encoder_phys *phys;
+
+	if (!drm_enc || !drm_enc->dev || !drm_enc->dev->dev_private) {
+		SDE_ERROR("invalid encoder parameters\n");
+		return -EINVAL;
+	}
+
+	sde_enc = to_sde_encoder_virt(drm_enc);
+
+	pr_err("sde_enc->num_phys_encs = %d\n", sde_enc->num_phys_encs);
+
+	for (i = 0; i < sde_enc->num_phys_encs; i++) {
+		phys = sde_enc->phys_encs[i];
+
+		if (phys) {
+			if (phys->ops.prepare_for_kickoff) {
+				rc = phys->ops.prepare_for_kickoff(
+						phys, NULL);
+				if (rc) {
+					pr_err("prepare for kickoff rc = %d\n", rc);
+					ret = rc;
+				}
+			}
+			pr_err("here is = %d\n", phys->enable_state);
+			if (phys->enable_state == SDE_ENC_ERR_NEEDS_HW_RESET)
+			_sde_encoder_setup_dither(phys);
+		}
+	}
+	return ret;
+}
+
+void sde_encoder_rc_lock(struct drm_encoder *drm_enc)
+{
+	struct sde_encoder_virt *sde_enc;
+
+	if (!drm_enc || !drm_enc->dev || !drm_enc->dev->dev_private) {
+		SDE_ERROR("invalid encoder parameters\n");
+		return;
+	}
+	sde_enc = to_sde_encoder_virt(drm_enc);
+	mutex_lock(&sde_enc->rc_lock);
+}
+
+void sde_encoder_rc_unlock(struct drm_encoder *drm_enc)
+{
+	struct sde_encoder_virt *sde_enc;
+
+	if (!drm_enc || !drm_enc->dev || !drm_enc->dev->dev_private) {
+		SDE_ERROR("invalid encoder parameters\n");
+		return;
+	}
+	sde_enc = to_sde_encoder_virt(drm_enc);
+	mutex_unlock(&sde_enc->rc_lock);
+}
+#endif
 
 int sde_encoder_display_failure_notification(struct drm_encoder *enc)
 {
