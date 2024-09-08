@@ -829,41 +829,41 @@ static int nfcc_hw_check(struct i2c_client *client, struct nqx_dev *nqx_dev)
 		nci_reset_rsp[1], nci_reset_rsp[2]);
 
 err_nfcc_reset_failed:
-	dev_dbg(&nqx_dev->client->dev, "NQ NFCC chip_type = %x\n",
+	dev_err(&nqx_dev->client->dev, "NQ NFCC chip_type = %x\n",
 		nqx_dev->nqx_info.info.chip_type);
-	dev_dbg(&nqx_dev->client->dev, "NQ fw version = %x.%x.%x\n",
+	dev_err(&nqx_dev->client->dev, "NQ fw version = %x.%x.%x\n",
 		nqx_dev->nqx_info.info.rom_version,
 		nqx_dev->nqx_info.info.fw_major,
 		nqx_dev->nqx_info.info.fw_minor);
 
 	switch (nqx_dev->nqx_info.info.chip_type) {
 	case NFCC_NQ_210:
-		dev_dbg(&client->dev,
+		dev_err(&client->dev,
 		"%s: ## NFCC == NQ210 ##\n", __func__);
 		break;
 	case NFCC_NQ_220:
-		dev_dbg(&client->dev,
+		dev_err(&client->dev,
 		"%s: ## NFCC == NQ220 ##\n", __func__);
 		break;
 	case NFCC_NQ_310:
-		dev_dbg(&client->dev,
+		dev_err(&client->dev,
 		"%s: ## NFCC == NQ310 ##\n", __func__);
 		break;
 	case NFCC_NQ_310A:
-		dev_dbg(&client->dev,
+		dev_err(&client->dev,
 		"%s: ## NFCC == NQ310A ##\n", __func__);
 		break;
 	case NFCC_NQ_330:
-		dev_dbg(&client->dev,
+		dev_err(&client->dev,
 		"%s: ## NFCC == NQ330 ##\n", __func__);
 		break;
 	case NFCC_PN66T:
-		dev_dbg(&client->dev,
+		dev_err(&client->dev,
 		"%s: ## NFCC == PN66T ##\n", __func__);
 		break;
 	case NFCC_SN100_A:
 	case NFCC_SN100_B:
-		dev_dbg(&client->dev,
+		dev_err(&client->dev,
 		"%s: ## NFCC == SN100x ##\n", __func__);
 		break;
 	default:
