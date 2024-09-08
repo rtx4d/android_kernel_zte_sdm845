@@ -835,6 +835,10 @@ err_nfcc_reset_failed:
 		dev_dbg(&client->dev,
 		"%s: ## NFCC == NQ310 ##\n", __func__);
 		break;
+	case NFCC_NQ_310A:
+		dev_dbg(&client->dev,
+		"%s: ## NFCC == NQ310A ##\n", __func__);
+		break;
 	case NFCC_NQ_330:
 		dev_dbg(&client->dev,
 		"%s: ## NFCC == NQ330 ##\n", __func__);
