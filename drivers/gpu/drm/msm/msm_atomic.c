@@ -74,6 +74,16 @@ EXPORT_SYMBOL(msm_drm_unregister_client);
  */
 static int msm_drm_notifier_call_chain(unsigned long val, void *v)
 {
+/*zte modify for tp no work after disconnent hdmi and cast start*/
+	struct msm_drm_notifier *notifier = (struct msm_drm_notifier *)v;
+
+	if (notifier->id != 0) {
+		pr_warn("%s, val: %lu, ctrc_index: %d, ignore!\n", __func__, val, notifier->id);
+		return NOTIFY_DONE;
+	}
+/*zte modify for tp no work after disconnent hdmi and cast end*/
+
+
 	return blocking_notifier_call_chain(&msm_drm_notifier_list, val,
 					    v);
 }
