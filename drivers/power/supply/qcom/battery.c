@@ -106,7 +106,7 @@ enum {
 	FORCE_INOV_DISABLE_BIT	= BIT(1),
 };
 
-static int debug_mask;
+static int debug_mask = 0xff;
 module_param_named(debug_mask, debug_mask, int, 0600);
 
 #define pl_dbg(chip, reason, fmt, ...)				\
@@ -114,7 +114,7 @@ module_param_named(debug_mask, debug_mask, int, 0600);
 		if (debug_mask & (reason))				\
 			pr_info(fmt, ##__VA_ARGS__);	\
 		else							\
-			pr_debug(fmt, ##__VA_ARGS__);		\
+			pr_info(fmt, ##__VA_ARGS__);		\
 	} while (0)
 
 #define IS_USBIN(mode)	((mode == POWER_SUPPLY_PL_USBIN_USBIN) \
@@ -1002,6 +1002,8 @@ static int pl_disable_vote_callback(struct votable *votable,
 	int master_fcc_ua = 0, total_fcc_ua = 0, slave_fcc_ua = 0;
 	int rc = 0;
 	bool disable = false;
+
+	pl_dbg(chip, PR_PARALLEL, "zte client is %s, disable is %d\n", client, pl_disable);
 
 	if (!is_main_available(chip))
 		return -ENODEV;
