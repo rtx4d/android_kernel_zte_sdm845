@@ -9,3 +9,6 @@ snd-soc-tfa98xx-objs += tfa9887B_init.o
 snd-soc-tfa98xx-objs += tfa9887_init.o
 
 obj-$(CONFIG_ZTE_FEATURE_NXP9890_SMART_PA)	+= snd-soc-tfa98xx.o
+
+# debugging
+EXTRA_CFLAGS += -DDEBUG
