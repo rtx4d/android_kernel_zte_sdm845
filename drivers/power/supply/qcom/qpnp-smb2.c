@@ -10,6 +10,7 @@
  * GNU General Public License for more details.
  */
 
+#define DEBUG
 #include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -50,14 +51,14 @@ static struct smb_params v1_params = {
 		.name	= "usb input current limit",
 		.reg	= USBIN_CURRENT_LIMIT_CFG_REG,
 		.min_u	= 0,
-		.max_u	= 4800000,
+		.max_u	= 2500000,
 		.step_u	= 25000,
 	},
 	.icl_stat		= {
 		.name	= "input current limit status",
 		.reg	= ICL_STATUS_REG,
 		.min_u	= 0,
-		.max_u	= 4800000,
+		.max_u	= 4000000,
 		.step_u	= 25000,
 	},
 	.otg_cl			= {
@@ -180,10 +181,20 @@ struct smb2 {
 	bool			bad_part;
 };
 
-static int __debug_mask;
+static int __debug_mask = 0x1f;
 module_param_named(
 	debug_mask, __debug_mask, int, 0600
 );
+
+#define smb2_dbg(reason, fmt, ...)			\
+	do {							\
+		if (__debug_mask & (reason))		\
+			pr_err("%s: " fmt, __func__, \
+				##__VA_ARGS__);	\
+		else						\
+			pr_debug("%s: " fmt, __func__, \
+				##__VA_ARGS__);	\
+	} while (0)
 
 static int __weak_chg_icl_ua = 500000;
 module_param_named(
@@ -217,6 +228,8 @@ static int smb2_parse_dt(struct smb2 *chip)
 		pr_err("device tree node missing\n");
 		return -EINVAL;
 	}
+
+	chg->set_chg_enabled = true;
 
 	chg->reddragon_ipc_wa = of_property_read_bool(node,
 				"qcom,qcs605-ipc-wa");
@@ -1002,6 +1015,7 @@ static enum power_supply_property smb2_batt_props[] = {
 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
 	POWER_SUPPLY_PROP_TEMP,
 	POWER_SUPPLY_PROP_TECHNOLOGY,
+	POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED,
 	POWER_SUPPLY_PROP_STEP_CHARGING_ENABLED,
 	POWER_SUPPLY_PROP_SW_JEITA_ENABLED,
 	POWER_SUPPLY_PROP_CHARGE_DONE,
@@ -1072,6 +1086,13 @@ static int smb2_batt_get_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMITED:
 		rc = smblib_get_prop_input_current_limited(chg, val);
 		break;
+	case POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED:
+		val->intval = get_effective_result(chg->chg_disable_votable);
+		if (val->intval < 0)
+			val->intval = 1;
+		else
+			val->intval = !val->intval;
+		break;
 	case POWER_SUPPLY_PROP_STEP_CHARGING_ENABLED:
 		val->intval = chg->step_chg_enabled;
 		break;
@@ -1113,7 +1134,7 @@ static int smb2_batt_get_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_SET_SHIP_MODE:
 		/* Not in ship mode as long as device is active */
-		val->intval = 0;
+		val->intval = smblib_get_prop_ship_mode(chg);
 		break;
 	case POWER_SUPPLY_PROP_DIE_HEALTH:
 		if (chg->die_health == -EINVAL)
@@ -1206,6 +1227,9 @@ static int smb2_batt_set_prop(struct power_supply *psy,
 			vote(chg->fcc_votable, BATT_PROFILE_VOTER, false, 0);
 		}
 		break;
+	case POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED:
+		vote(chg->chg_disable_votable, BATTCHG_USER_EN_VOTER,	!val->intval, 0);
+		break;
 	case POWER_SUPPLY_PROP_STEP_CHARGING_ENABLED:
 		chg->step_chg_enabled = !!val->intval;
 		break;
@@ -1228,7 +1252,7 @@ static int smb2_batt_set_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_SET_SHIP_MODE:
 		/* Not in ship mode as long as the device is active */
-		if (!val->intval)
+		if (val->intval)
 			break;
 		if (chg->pl.psy)
 			power_supply_set_property(chg->pl.psy,
@@ -1271,6 +1295,8 @@ static int smb2_batt_prop_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_STEP_CHARGING_ENABLED:
 	case POWER_SUPPLY_PROP_SW_JEITA_ENABLED:
 	case POWER_SUPPLY_PROP_DIE_HEALTH:
+	case POWER_SUPPLY_PROP_SET_SHIP_MODE:
+	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
 		return 1;
 	default:
 		break;
@@ -1714,6 +1740,7 @@ static int smb2_init_hw(struct smb2 *chip)
 	}
 
 	/* Connector types based votes */
+	vote(chg->usb_icl_votable, DEFAULT_VOTER, true, chip->dt.usb_icl_ua);
 	vote(chg->hvdcp_disable_votable_indirect, PD_INACTIVE_VOTER,
 		(chg->connector_type == POWER_SUPPLY_CONNECTOR_TYPEC), 0);
 	vote(chg->hvdcp_disable_votable_indirect, VBUS_CC_SHORT_VOTER,
@@ -1892,6 +1919,13 @@ static int smb2_init_hw(struct smb2 *chip)
 			dev_err(chg->dev, "Couldn't set hw jeita rc=%d\n", rc);
 			return rc;
 		}
+	}
+
+	rc = smblib_wipower_init(chg);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't configure smblib_wipower_init rc=%d\n",
+			rc);
+		return rc;
 	}
 
 	if (chg->disable_stat_sw_override) {
@@ -2442,6 +2476,20 @@ static int smb2_probe(struct platform_device *pdev)
 		goto cleanup;
 	}
 
+	rc = force_hvdcp_qc2p0_to_9v(chg);
+	if (rc < 0) {
+		if (rc != -EPROBE_DEFER)
+			pr_err("Couldn't force_hvdcp_qc2p0_to_9v rc=%d\n", rc);
+		return rc;
+	}
+
+	rc = limit_hvdcp_qc3p0_vbus(chg);
+	if (rc < 0) {
+		if (rc != -EPROBE_DEFER)
+			pr_err("Couldn't limit_hvdcp_qc3p0_vbus rc=%d\n", rc);
+		return rc;
+	}
+
 	/* set driver data before resources request it */
 	platform_set_drvdata(pdev, chip);
 
@@ -2609,6 +2657,8 @@ static void smb2_shutdown(struct platform_device *pdev)
 {
 	struct smb2 *chip = platform_get_drvdata(pdev);
 	struct smb_charger *chg = &chip->chg;
+
+	smblib_battery_charging(chg, true);
 
 	/* disable all interrupts */
 	smb2_disable_interrupts(chg);

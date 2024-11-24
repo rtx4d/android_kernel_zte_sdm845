@@ -21,7 +21,7 @@
 
 static void power_supply_update_bat_leds(struct power_supply *psy)
 {
-	union power_supply_propval status;
+	union power_supply_propval status = {0, };
 	unsigned long delay_on = 0;
 	unsigned long delay_off = 0;
 
