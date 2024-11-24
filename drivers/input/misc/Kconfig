@@ -907,4 +907,7 @@ config INPUT_SX9310
 		To compile this driver as a module, choose M here: the
 		module will be called SX9310.
 
+config SAR_SPECIAL_TRIGGER_THRESHOLD
+	bool "Enable sar special trgger threshold"
+
 endif
