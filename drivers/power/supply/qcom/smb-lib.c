@@ -2252,7 +2252,7 @@ int smblib_select_dcin_voltage(struct smb_charger *chg)
 		return -EINVAL;
 	}
 
-	rc = smblib_get_prop_batt_temp(chg, &batt_temp);
+	rc = smblib_get_prop_from_bms(chg, POWER_SUPPLY_PROP_TEMP, &batt_temp);
 	if (rc < 0) {
 		pr_err("Couldn't get batt temp rc=%d\n", rc);
 		return -EINVAL;
@@ -5066,7 +5066,7 @@ enum alarmtimer_restart smblib_charging_thermal_alarm_cb(struct alarm *alarm,
 	union power_supply_propval usb_present = {0, };
 	union power_supply_propval dc_present = {0, };
 
-	rc = smblib_get_prop_batt_temp(chg, &batt_temp);
+	rc = smblib_get_prop_from_bms(chg, POWER_SUPPLY_PROP_TEMP, &batt_temp);
 	if (rc < 0) {
 		pr_err("Couldn't get batt temp rc=%d\n", rc);
 		alarm_forward_now(&chg->thermal_alarm, ns_to_ktime(alarm_period_ns));
@@ -5707,10 +5707,10 @@ static void update_heartbeat(struct work_struct *work)
 		return;
 	}
 
-	smblib_get_prop_batt_temp(chg, &val);
+	smblib_get_prop_from_bms(chg, POWER_SUPPLY_PROP_TEMP, &val);
 	temperature = val.intval / TEMPERATURE_RATIO;
 
-	smblib_get_prop_batt_voltage_now(chg, &val);
+	smblib_get_prop_from_bms(chg, POWER_SUPPLY_PROP_VOLTAGE_NOW, &val);
 	voltage = val.intval / VOLTAGE_RATIO;
 
 	smblib_get_prop_batt_capacity(chg, &val);
@@ -5725,7 +5725,7 @@ static void update_heartbeat(struct work_struct *work)
 	smblib_get_prop_batt_present(chg, &val);
 	present = val.intval;
 
-	smblib_get_prop_batt_current_now(chg, &val);
+	smblib_get_prop_from_bms(chg, POWER_SUPPLY_PROP_CURRENT_NOW, &val);
 	chg_current = val.intval;
 
 	smblib_get_prop_batt_health(chg, &val);
