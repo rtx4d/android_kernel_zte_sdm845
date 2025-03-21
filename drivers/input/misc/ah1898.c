@@ -27,7 +27,7 @@
 #include <linux/regulator/consumer.h>
 /*#define AH1898_IRQ 11*/
 
-static int hall_status = 1;
+static int hall_status = 0;
 struct pinctrl *hall_gpio_pinctrl = NULL;
 struct pinctrl_state *hall_gpio_state = NULL;
 
@@ -76,7 +76,7 @@ static void ah1898_work_func(struct work_struct *work)
 			input_report_key(ah1898_chip_data->input, KEY_HALL_SENSOR_UP, 1);
 			input_sync(ah1898_chip_data->input);
 			input_report_key(ah1898_chip_data->input, KEY_HALL_SENSOR_UP, 0);
-			hall_status = 1;
+			hall_status = 0;
 		} else {
 		/*log for on*/
 			pr_info("%s:hall ===switch is on!!the value = %d\n", __func__, value);
@@ -88,8 +88,9 @@ static void ah1898_work_func(struct work_struct *work)
 			input_report_key(ah1898_chip_data->input, KEY_HALL_SENSOR_DOWN, 1);
 			input_sync(ah1898_chip_data->input);
 			input_report_key(ah1898_chip_data->input, KEY_HALL_SENSOR_DOWN, 0);
-			hall_status = 0;
+			hall_status = 1;
 		}
+ 		input_report_switch(ah1898_chip_data->input, SW_LID, hall_status);
 		input_sync(ah1898_chip_data->input);
 	}
 	/*enable_irq(ah1898_chip_data->irq);*/
@@ -260,12 +261,15 @@ static int  ah1898_probe(struct platform_device *pdev)
 /*input*/
 	ah1898_chip_data->input->name = "ah1898";
 
+ 	set_bit(EV_SW, ah1898_chip_data->input->evbit);
 	set_bit(EV_KEY, ah1898_chip_data->input->evbit);
 	/*set_bit(KEY_POWER, ah1898_chip_data->input->keybit);*/
 /*hall sensor key*/
 	set_bit(KEY_HALL_SENSOR_DOWN, ah1898_chip_data->input->keybit);
 	set_bit(KEY_HALL_SENSOR_UP, ah1898_chip_data->input->keybit);
 
+ 	input_set_capability(ah1898_chip_data->input, EV_SW, SW_LID);
+	
 	error = input_register_device(ah1898_chip_data->input);
 	if (error) {
 		pr_err("ah1898: Unable to register input device, error: %d\n", error);
@@ -328,9 +332,9 @@ static int  ah1898_probe(struct platform_device *pdev)
 	value_status = gpio_get_value(ah1898_chip_data->irq);
 			pr_err("gpio-ah1898: irq %d;\n", value_status);
 	if (value_status == 1) {
-		hall_status = 1;
-	} else {
 		hall_status = 0;
+ 	} else {
+ 		hall_status = 1;
 	}
 
 	error = ah1898_config_regulator(pdev, true);
