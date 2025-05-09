@@ -193,11 +193,13 @@
 			compatible = "nxp,tfa9890";
 			reg = <0x35>;
 			reset_gpio= <&tlmm 76 0>;
+		status = "ok";
 		};
 		tfa98xx@34 {
 			compatible = "nxp,tfa9890";
 			reg = <0x34>;
 			reset_gpio= <&tlmm 75 0>;
+		status = "ok";
 		};
 	};
 

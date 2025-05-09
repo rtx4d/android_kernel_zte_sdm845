@@ -2756,7 +2756,7 @@ enum Tfa98xx_Error tfaRunStartup(Tfa98xx_handle_t handle, int profile)
 	switch (TFA_GET_BF(handle, REV) & 0xff) {
 	case 0x80:
 		err = tfa98xx_dsp_reset(handle, 1);
-		pr_debug("tfaRunStartup Reset DSP after power on\n");
+		pr_debug("tfaRunStartup Reset NEW DSP after power on\n");
 		break;
 	default:
 		break;
@@ -2767,7 +2767,7 @@ enum Tfa98xx_Error tfaRunStartup(Tfa98xx_handle_t handle, int profile)
 	if (tfa98xx_runtime_verbose) {
 		if (TFA_GET_BF(handle, NOCLK) && (tfa98xx_dev_family(handle) == 2))
 			pr_debug("Using internal clock\n");
-		pr_debug("Waiting for DSP system stable...\n");
+		pr_debug("Waiting for NEW DSP system stable...\n");
 	}
 	for (tries = 1; tries < CFSTABLE_TRIES; tries++) {
 		err = tfa98xx_dsp_system_stable(handle, &status);
@@ -2779,7 +2779,7 @@ enum Tfa98xx_Error tfaRunStartup(Tfa98xx_handle_t handle, int profile)
 	}
 	if (tries == CFSTABLE_TRIES) {
 		if (tfa98xx_runtime_verbose)
-			pr_debug("Timed out\n");
+			pr_debug("Timed out 123123123\n");
 		return Tfa98xx_Error_StateTimedOut;
 	}
 	if (tfa98xx_runtime_verbose)

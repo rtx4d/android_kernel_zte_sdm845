@@ -621,9 +621,9 @@ static struct wcd_mbhc_config wcd_mbhc_cfg = {
 	.swap_gnd_mic = NULL,
 	.hs_ext_micbias = true,
 	.key_code[0] = KEY_MEDIA,
-	.key_code[1] = KEY_VOICECOMMAND,
-	.key_code[2] = KEY_VOLUMEUP,
-	.key_code[3] = KEY_VOLUMEDOWN,
+	.key_code[1] = KEY_VOLUMEUP,
+	.key_code[2] = KEY_VOLUMEDOWN,
+	.key_code[3] = 0,
 	.key_code[4] = 0,
 	.key_code[5] = 0,
 	.key_code[6] = 0,
@@ -4195,7 +4195,7 @@ static void *def_tavil_mbhc_cal(void)
 		return NULL;
 
 #define S(X, Y) ((WCD_MBHC_CAL_PLUG_TYPE_PTR(tavil_wcd_cal)->X) = (Y))
-	S(v_hs_max, 1600);
+	S(v_hs_max, 1700);
 #undef S
 #define S(X, Y) ((WCD_MBHC_CAL_BTN_DET_PTR(tavil_wcd_cal)->X) = (Y))
 	S(num_btn, WCD_MBHC_DEF_BUTTONS);
@@ -4205,14 +4205,14 @@ static void *def_tavil_mbhc_cal(void)
 	btn_high = ((void *)&btn_cfg->_v_btn_low) +
 		(sizeof(btn_cfg->_v_btn_low[0]) * btn_cfg->num_btn);
 
-	btn_high[0] = 75;
-	btn_high[1] = 150;
-	btn_high[2] = 237;
-	btn_high[3] = 500;
-	btn_high[4] = 500;
-	btn_high[5] = 500;
-	btn_high[6] = 500;
-	btn_high[7] = 500;
+	btn_high[0] = 100;
+	btn_high[1] = 750;
+	btn_high[2] = 200;
+	btn_high[3] = 750;
+	btn_high[4] = 750;
+	btn_high[5] = 750;
+	btn_high[6] = 750;
+	btn_high[7] = 750;
 
 	return tavil_wcd_cal;
 }
@@ -4543,6 +4543,7 @@ static int msm_set_pinctrl(struct msm_pinctrl_info *pinctrl_info,
 			goto err;
 		}
 		break;
+#if 0
 	case STATE_TDM_ACTIVE:
 		ret = pinctrl_select_state(pinctrl_info->pinctrl,
 					pinctrl_info->tdm_active);
@@ -4553,14 +4554,18 @@ static int msm_set_pinctrl(struct msm_pinctrl_info *pinctrl_info,
 			goto err;
 		}
 		break;
+#endif
 	case STATE_DISABLE:
 		if (curr_state == STATE_MI2S_ACTIVE) {
 			ret = pinctrl_select_state(pinctrl_info->pinctrl,
 					pinctrl_info->mi2s_disable);
-		} else {
+		}
+#if 0
+		else {
 			ret = pinctrl_select_state(pinctrl_info->pinctrl,
 					pinctrl_info->tdm_disable);
 		}
+#endif
 		if (ret) {
 			pr_err("%s:  state disable failed with %d\n",
 				__func__, ret);
@@ -4624,6 +4629,7 @@ static int msm_get_pinctrl(struct platform_device *pdev)
 		pr_err("%s: could not get mi2s_active pinstate\n", __func__);
 		goto err;
 	}
+#if 0
 	pinctrl_info->tdm_disable = pinctrl_lookup_state(pinctrl,
 						"quat-tdm-sleep");
 	if (IS_ERR(pinctrl_info->tdm_disable)) {
@@ -4637,6 +4643,7 @@ static int msm_get_pinctrl(struct platform_device *pdev)
 			__func__);
 		goto err;
 	}
+#endif
 	/* Reset the TLMM pins to a default state */
 	ret = pinctrl_select_state(pinctrl_info->pinctrl,
 					pinctrl_info->mi2s_disable);
@@ -4815,6 +4822,7 @@ static int sdm845_tdm_snd_startup(struct snd_pcm_substream *substream)
 	struct msm_asoc_mach_data *pdata = snd_soc_card_get_drvdata(card);
 	struct msm_pinctrl_info *pinctrl_info = &pdata->pinctrl_info;
 
+#if 0
 	/* currently only supporting TDM_RX_0/TDM_RX_1 and TDM_TX_0 */
 	if ((cpu_dai->id == AFE_PORT_ID_QUATERNARY_TDM_RX) ||
 		(cpu_dai->id == AFE_PORT_ID_QUATERNARY_TDM_TX) ||
@@ -4827,6 +4835,7 @@ static int sdm845_tdm_snd_startup(struct snd_pcm_substream *substream)
 		}
 		atomic_inc(&pinctrl_ref_count);
 	}
+#endif
 
 	return ret;
 }
@@ -4840,6 +4849,7 @@ static void sdm845_tdm_snd_shutdown(struct snd_pcm_substream *substream)
 	struct msm_asoc_mach_data *pdata = snd_soc_card_get_drvdata(card);
 	struct msm_pinctrl_info *pinctrl_info = &pdata->pinctrl_info;
 
+#if 0
 	/* currently only supporting TDM_RX_0/TDM_RX_1 and TDM_TX_0 */
 	if ((cpu_dai->id == AFE_PORT_ID_QUATERNARY_TDM_RX) ||
 		(cpu_dai->id == AFE_PORT_ID_QUATERNARY_TDM_TX) ||
@@ -4852,6 +4862,7 @@ static void sdm845_tdm_snd_shutdown(struct snd_pcm_substream *substream)
 					__func__, ret);
 		}
 	}
+#endif
 }
 
 static struct snd_soc_ops sdm845_tdm_be_ops = {
@@ -5005,14 +5016,14 @@ static struct snd_soc_ops msm_wcn_ops = {
 	.hw_params = msm_wcn_hw_params,
 };
 
-static struct snd_soc_dai_link_component tfa98xx_soc_dai_link_component[] = {
-	{
-		.name = "tfa98xx.5-0034",
-		.dai_name = "tfa98xx-aif-5-34",
-	},
+static struct snd_soc_dai_link_component tfa98xx_dai_link_component[] = {
 	{
 		.name = "tfa98xx.5-0035",
 		.dai_name = "tfa98xx-aif-5-35",
+	},
+	{
+		.name = "tfa98xx.5-0034",
+		.dai_name = "tfa98xx-aif-5-34",
 	},
 };
 
@@ -5589,22 +5600,6 @@ static struct snd_soc_dai_link msm_common_dai_links[] = {
 			    SND_SOC_DPCM_TRIGGER_POST},
 		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
 		.ignore_suspend = 1,
-		.ignore_pmdown_time = 1,
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-	},
-	{
-		.name = "QUAT_MI2S Hostless",
-		.stream_name = "QUAT_MI2S Hostless",
-		.cpu_dai_name = "QUAT_MI2S_RX_HOSTLESS",
-		.platform_name = "msm-pcm-hostless",
-		.dynamic = 1,
-		.dpcm_playback = 1,
-		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
-			    SND_SOC_DPCM_TRIGGER_POST},
-		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
-		.ignore_suspend = 1,
-		 /* this dailink has playback support */
 		.ignore_pmdown_time = 1,
 		.codec_dai_name = "snd-soc-dummy-dai",
 		.codec_name = "snd-soc-dummy",
@@ -6353,7 +6348,7 @@ static struct snd_soc_dai_link msm_mi2s_be_dai_links[] = {
 		.stream_name = "Quaternary MI2S Playback",
 		.cpu_dai_name = "msm-dai-q6-mi2s.3",
 		.platform_name = "msm-pcm-routing",
-		.codecs = tfa98xx_soc_dai_link_component,
+		.codecs = tfa98xx_dai_link_component,
 		.num_codecs = 2,
 		.no_pcm = 1,
 		.dpcm_playback = 1,
@@ -6493,6 +6488,21 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.dpcm_capture = 1,
 		.id = MSM_BACKEND_DAI_QUAT_AUXPCM_TX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+	},
+	/* Quaternary MI2S Backend DAI Links */
+	{
+		.name = "QUAT_MI2S Hostless",
+		.stream_name = "QUAT_MI2S Hostless",
+		.cpu_dai_name = "QUAT_MI2S_RX_HOSTLESS",
+		.platform_name = "msm-pcm-hostless",
+		.codecs = tfa98xx_dai_link_component,
+		.num_codecs = 2,
+		.trigger = { SND_SOC_DPCM_TRIGGER_POST, SND_SOC_DPCM_TRIGGER_POST },
+		.dynamic = 1,
+		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
+		.dpcm_playback = 1,
 		.ignore_suspend = 1,
 		.ignore_pmdown_time = 1,
 	},

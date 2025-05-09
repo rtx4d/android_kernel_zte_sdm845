@@ -42,6 +42,7 @@ enum lra_res_sig_shape {
 };
 
 enum lra_auto_res_mode {
+	AUTO_RES_MODE_NONE,
 	AUTO_RES_MODE_ZXD,
 	AUTO_RES_MODE_QWD,
 };
@@ -98,7 +99,7 @@ enum haptics_custom_effect_param {
 #define HAP_ZX_HYST_EN_BIT		BIT(1)
 #define HAP_PWM_CTL_EN_BIT		BIT(0)
 
-#define REG_HAP_AUTO_RES_CTRL		0x4B
+#define REG_HAP_AUTO_RES_CTRL	0xE3 	// 0x4B
 #define HAP_AUTO_RES_EN_BIT		BIT(7)
 #define HAP_SEL_AUTO_RES_PERIOD		BIT(6)
 #define HAP_AUTO_RES_CNT_ERR_DELTA_MASK	GENMASK(5, 4)
@@ -122,12 +123,13 @@ enum haptics_custom_effect_param {
 #define HAP_WF_SOURCE_PWM		(3 << HAP_WF_SOURCE_SHIFT)
 
 #define REG_HAP_AUTO_RES_CFG		0x4F
-#define HAP_AUTO_RES_MODE_BIT		BIT(7)
-#define HAP_AUTO_RES_MODE_SHIFT		7
-#define HAP_AUTO_RES_CAL_DURATON_MASK	GENMASK(6, 5)
-#define HAP_CAL_EOP_EN_BIT		BIT(3)
-#define HAP_CAL_PERIOD_MASK		GENMASK(2, 0)
-#define HAP_CAL_OPT3_EVERY_8_PERIOD	2
+#define HAP_AUTO_RES_MODE_MASK		GENMASK(6, 4)
+#define HAP_AUTO_RES_MODE_SHIFT		4
+#define HAP_HIGH_Z_MASK			GENMASK(3, 2)
+#define HAP_HIGH_Z_SHIFT		2
+#define HAP_RES_CAL_MASK		GENMASK(1, 0)
+#define HAP_RES_CAL_PERIOD_MIN		4
+#define HAP_RES_CAL_PERIOD_MAX		32
 
 #define REG_HAP_SLEW_CFG		0x50
 #define REG_HAP_VMAX_CFG		0x51
@@ -206,8 +208,11 @@ struct qti_hap_config {
 	u16			vmax_mv;
 	u16			ilim_ma;
 	u16			play_rate_us;
+	u8          lra_res_cal_period;
+	u8          lra_high_z_opt;
 	bool			lra_allow_variable_play_rate;
 	bool			use_ext_wf_src;
+	bool            lra_disable_auto_res;
 };
 
 struct qti_hap_chip {
@@ -669,7 +674,7 @@ static int qti_haptics_load_constant_waveform(struct qti_hap_chip *chip)
 
 		/* Enable Auto-Resonance when VMAX wf-src is selected */
 		if (config->act_type == ACT_LRA) {
-			rc = qti_haptics_lra_auto_res_enable(chip, true);
+			rc = qti_haptics_lra_auto_res_enable(chip, !config->lra_disable_auto_res);
 			if (rc < 0)
 				return rc;
 		}
@@ -976,6 +981,12 @@ static int qti_haptics_playback(struct input_dev *dev, int effect_id, int val)
 		if (rc < 0)
 			return rc;
 
+		if (chip->config.act_type == ACT_LRA) {
+			rc = qti_haptics_lra_auto_res_enable(chip, chip->config.lra_disable_auto_res);
+			if (rc < 0)
+				return rc;
+		}
+
 		rc = qti_haptics_play(chip, true);
 		if (rc < 0)
 			return rc;
@@ -1167,11 +1178,19 @@ static int qti_haptics_hw_init(struct qti_hap_chip *chip)
 		dev_err(chip->dev, "write lra_sig_shape failed, rc=%d\n", rc);
 		return rc;
 	}
+	
+	if (config->lra_res_cal_period < HAP_RES_CAL_PERIOD_MIN)
+		config->lra_res_cal_period = HAP_RES_CAL_PERIOD_MIN;
 
+	if (config->lra_res_cal_period < HAP_RES_CAL_PERIOD_MAX)
+		config->lra_res_cal_period = HAP_RES_CAL_PERIOD_MAX;
+ 
 	addr = REG_HAP_AUTO_RES_CFG;
-	mask = HAP_AUTO_RES_MODE_BIT | HAP_CAL_EOP_EN_BIT | HAP_CAL_PERIOD_MASK;
-	val = config->lra_auto_res_mode << HAP_AUTO_RES_MODE_SHIFT;
-	val |= HAP_CAL_EOP_EN_BIT | HAP_CAL_OPT3_EVERY_8_PERIOD;
+	mask = HAP_RES_CAL_MASK | HAP_HIGH_Z_MASK | HAP_RES_CAL_MASK;
+	val = ilog2(config->lra_res_cal_period / HAP_RES_CAL_PERIOD_MIN);
+	val |= config->lra_res_cal_period / HAP_RES_CAL_PERIOD_MIN;
+	val |= config->lra_auto_res_mode << HAP_AUTO_RES_MODE_SHIFT;
+
 	rc = qti_haptics_masked_write(chip, addr, mask, val);
 	if (rc < 0) {
 		dev_err(chip->dev, "set AUTO_RES_CFG failed, rc=%d\n", rc);
@@ -1371,12 +1390,27 @@ static int qti_haptics_parse_dt(struct qti_hap_chip *chip)
 				config->lra_auto_res_mode = AUTO_RES_MODE_ZXD;
 			} else if (strcmp(str, "qwd") == 0) {
 				config->lra_auto_res_mode = AUTO_RES_MODE_QWD;
-			} else {
+			} else if (strcmp(str, "none") == 0) {
+				config->lra_auto_res_mode = AUTO_RES_MODE_NONE;
+			}else {
 				dev_err(chip->dev, "Invalid auto resonance mode: %s\n",
 						str);
 				return -EINVAL;
 			}
 		}
+
+		config->lra_disable_auto_res = of_property_read_bool(node,
+				"qcom,lra-auto-resonance-disable");
+
+		rc = of_property_read_u8(node,
+				"qcom,lra-res-cal-period", &config->lra_res_cal_period);
+		if (rc)
+			return -EINVAL;
+
+		rc = of_property_read_u8(node,
+				"qcom,lra-high-z-opt", &config->lra_high_z_opt);
+		if (rc)
+			return -EINVAL;
 	}
 
 	chip->constant.pattern = devm_kcalloc(chip->dev,

@@ -3375,7 +3375,7 @@ static struct i2c_driver tfa98xx_i2c_driver = {
 	.id_table = tfa98xx_i2c_id,
 };
 
-static int trace_level = 0;
+static int trace_level = 7;
 module_param(trace_level, int, S_IRUGO);
 MODULE_PARM_DESC(trace_level, "TFA98xx debug trace level (0=off, bits:1=verbose,2=regdmesg,3=regftrace).");
 static int __init tfa98xx_i2c_init(void)
